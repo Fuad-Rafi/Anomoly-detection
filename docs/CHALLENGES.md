@@ -335,6 +335,17 @@ appeared.
   remain product validation work.
 - **Lesson:** A CCTV alarm should be calibrated and scored per tracked subject over time.
 
+## C-27 - Mixed normal and anomalous candidate clips
+
+- **Symptom:** Candidate ShanghaiTech clips contain walking/crowd footage but also labelled
+  anomaly intervals.
+- **Root cause:** Test clips are event sequences, not wholly normal calibration videos.
+- **Fix:** Restrict screening to mask-zero intervals and retain the interval definitions in
+  the calibration output.
+- **Status:** Initial screening complete; human interval review and hard-negative refit remain
+  pending.
+- **Lesson:** A low-positive clip is not automatically a valid negative.
+
 | Issue | Priority | Next action |
 |---|---|---|
 | Memory-safe full-test evaluation | High | Stream metrics per video or use two-tier evaluation |

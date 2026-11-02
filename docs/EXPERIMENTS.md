@@ -519,6 +519,40 @@ The calibration output records the 99.5th percentile image, region, velocity, po
 deep thresholds. It must be generated from normal footage not used to fit the density
 estimators.
 
+### T13a — Initial held-out calibration and hard-negative screening
+
+The existing scene-1 checkpoint was evaluated without retraining at gaps 2, 5, and 10
+on normal training AVIs from scenes 2 and 3. The provisional 99.5th-percentile
+thresholds were:
+
+| Gap | Image | Region |
+|---:|---:|---:|
+| 2 | 2.376 | 1.842 |
+| 5 | 2.937 | 2.253 |
+| 10 | 5.797 | 3.167 |
+
+These characterize inference-gap sensitivity only; they are not final deployment
+thresholds because the checkpoint was fitted with a different temporal preparation.
+
+To avoid treating an entire test clip as normal, candidate hard negatives were restricted
+to visually reviewed, mask-zero intervals from `01_0025`, `01_0063`, and `07_0048`.
+At gap 5, 36 sampled pairs produced image max 4.288 and region max 3.050, above the
+scene-2/3 normal calibration values. This confirms that normal walking/crowd footage is
+a meaningful hard-negative source and that camera-specific calibration is required.
+The intervals are provisional until frame-by-frame human review is complete; no refit
+has been performed yet.
+
+The interval-aware command is:
+
+```powershell
+.\.venv\Scripts\python.exe src\calibrate_people_thresholds.py `
+  --interval data\shanghaitech\testing\frames\01_0025:1:127 `
+  --interval data\shanghaitech\testing\frames\01_0063:1:59 `
+  --interval data\shanghaitech\testing\frames\07_0048:1:168 `
+  --frame-gap 5 --sample-step 10 --max-pairs-per-video 20 `
+  --output results\calibration\hard_negative_check.json
+```
+
 ---
 
 ## 6. Planned experiment matrix

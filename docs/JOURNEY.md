@@ -733,6 +733,13 @@ This is deliberately a prototype architecture. AI-VAD can flag unusual behavior,
 reliable “fight detector” may still require a supervised verifier trained with hard negatives
 such as walking, running, waving, crowds, and camera-specific motion.
 
+The first independent calibration pass used normal training footage from scenes 2 and 3.
+At gap 5 its 99.5th-percentile image/region thresholds were 2.937/2.253. A separate
+screen over visually reviewed mask-zero intervals from scene-1 test clips reached maxima
+of 4.288/3.050, confirming that walking and crowd motion are useful hard negatives rather
+than evidence that the fight event is correctly identified. These intervals are provisional
+until human review is complete; no hard-negative refit has been claimed.
+
 ---
 
 ## 10. Hyperparameters used (first run)

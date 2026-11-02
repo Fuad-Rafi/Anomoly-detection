@@ -1,0 +1,18 @@
+{
+  "sources": [
+    "data\\shanghaitech\\training\\converted_videos\\02_001.avi",
+    "data\\shanghaitech\\training\\converted_videos\\03_001.avi"
+  ],
+  "frame_gap": 2,
+  "pairs": 120,
+  "quantile": 99.5,
+  "image_threshold": 2.3755469298362732,
+  "box_threshold": 1.8420189142227166,
+  "component_thresholds": {
+    "velocity": 0.12286611013114451,
+    "pose": 1.0727204084396362,
+    "deep": 1.0953483462333677
+  },
+  "image_max": 2.415403366088867,
+  "region_max": 2.0736987590789795
+}

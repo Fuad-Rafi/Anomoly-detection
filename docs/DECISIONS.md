@@ -289,6 +289,17 @@ made, and its consequences. Status values: **Accepted**, **Superseded**, **Provi
   or BoT-SORT can replace it later. AI-VAD remains an unusual-behavior detector, not a
   guaranteed fight classifier.
 
+## D-22 - Use interval-scoped hard-negative mining
+
+- **Date:** 2026-11-02
+- **Status:** Accepted
+- **Context:** ShanghaiTech test clips mix normal walking with labelled anomalies, so a
+  whole clip cannot safely be added as normal calibration data.
+- **Decision:** Use mask-zero, visually reviewed frame intervals for provisional hard-negative
+  screening, and keep independent normal training footage for threshold calibration.
+- **Consequences:** The workflow avoids label leakage but requires interval review before any
+  refit. Camera-specific thresholds remain necessary.
+
 | Original | Replaced by | Reason |
 |---|---|---|
 | Industrial image anomaly detection on MVTec-AD | Video anomaly detection on ShanghaiTech/Avenue/UCSD | User wanted video; MVTec has no video |

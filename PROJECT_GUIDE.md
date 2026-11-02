@@ -716,6 +716,8 @@ must subsample frames, reduce resolution, or stream metrics per video.
 - PaDiM and PatchCore on scenes 1–3.
 - AI-VAD on scenes 1–3.
 - AI-VAD gap experiment and held-out normal calibration.
+- Initial scene-2/3 calibration and mask-zero walking/crowd hard-negative screening;
+  final gap-matched fitting and hard-negative refit remain pending.
 - Track-level false-alarm and event metrics.
 - First heatmaps and timelines.
 

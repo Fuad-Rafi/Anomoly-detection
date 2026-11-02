@@ -147,9 +147,13 @@ Checkpoint: `results/patchcore/scene01/Patchcore/ShanghaiTech/v0/weights/lightni
 - Lightweight IoU tracks, rolling score histories, persistence, and hysteresis are wired in.
 - `src/calibrate_people_thresholds.py` produces camera-specific thresholds from held-out
   normal frames.
-- Next validation: fit deployment-like gaps (2/5/10), calibrate on normal walking, mine
-  hard negatives, and report false alerts per camera-day, event recall, localization,
-  latency, and FPS.
+- Initial gap 2/5/10 calibration is complete on independent scene-2/3 normal training
+  footage; gap 5 produced image/region thresholds of 2.937/2.253 at the 99.5th percentile.
+- A provisional hard-negative screen over reviewed mask-zero intervals found higher
+  walking/crowd maxima (4.288 image, 3.050 region at gap 5).
+- Pending: fit deployment-like gap checkpoints, finish interval review, refit with
+  confirmed hard negatives, and report false alerts per camera-day, event recall,
+  localization, latency, and FPS.
 
 ## Immediate next actions
 

@@ -1,0 +1,19 @@
+﻿{
+    "sources":  [
+                    "data\\shanghaitech\\testing\\frames\\01_0025:1:127",
+                    "data\\shanghaitech\\testing\\frames\\01_0063:1:59",
+                    "data\\shanghaitech\\testing\\frames\\07_0048:1:168"
+                ],
+    "frame_gap":  5,
+    "pairs":  36,
+    "quantile":  99.5,
+    "image_threshold":  4.0927672863006626,
+    "box_threshold":  2.994737386703491,
+    "component_thresholds":  {
+                                 "velocity":  0.8629162013530731,
+                                 "pose":  1.8636868596076965,
+                                 "deep":  1.2801457643508911
+                             },
+    "image_max":  4.288348197937012,
+    "region_max":  3.0496742725372314
+}

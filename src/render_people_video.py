@@ -108,6 +108,9 @@ def infer_pair(model: AiVad, first_bgr: np.ndarray, last_bgr: np.ndarray, device
                 score = estimator.pose_estimator.predict(feature_set[FeatureType.POSE])
                 component_scores["pose"] = score
                 score_parts.append(score)
+            if not score_parts:
+                height, width = last_bgr.shape[:2]
+                return 0.0, np.zeros((height, width), dtype=np.float32), None, None, {}
             region_scores = sum(score_parts)
             image_scores = sum(score.max() for score in score_parts)
             anomaly_map = torch.amax(

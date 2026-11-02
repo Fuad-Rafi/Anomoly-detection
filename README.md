@@ -116,6 +116,11 @@ The next product validation target is fewer than 1--2 false alerts per camera-da
 retaining high recall on labelled fights, falls, running, and trespassing events. ShanghaiTech
 is a research benchmark; deployment requires camera-specific normal footage and review.
 
+Initial held-out calibration at gap 5 gave image/region thresholds of 2.937/2.253 on
+independent scene-2/3 normal training footage. A provisional screen of reviewed
+mask-zero walking/crowd intervals still reached 4.288/3.050, so these values are
+diagnostic only and hard-negative review plus camera-specific calibration remain required.
+
 ## Environment (installed and verified)
 
 | Item | Value |
