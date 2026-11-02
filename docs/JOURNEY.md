@@ -740,6 +740,12 @@ of 4.288/3.050, confirming that walking and crowd motion are useful hard negativ
 than evidence that the fight event is correctly identified. These intervals are provisional
 until human review is complete; no hard-negative refit has been claimed.
 
+The latest presentation render uses a five-frame (0.5 second) gap, five-frame smoothing,
+and six-of-ten track persistence. With image/box thresholds 2.25/2.0, it produces 33
+boxed frames concentrated in 168-200 and 383-395, removing the earlier isolated walking
+boxes around seconds 6-8. This improves the demo's stability but is not evidence of a
+new trained-model benchmark result.
+
 ---
 
 ## 10. Hyperparameters used (first run)

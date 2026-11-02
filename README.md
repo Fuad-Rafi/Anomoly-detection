@@ -94,6 +94,11 @@ results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4
 - Scores: `results/videos/shanghaitech_scene01_01_0026_people_annotated.scores.csv`
 - Samples: `results/videos/01_0026_people_samples/`
 
+Updated cleaned render using a 0.5-second temporal gap and track persistence:
+`results/videos/shanghaitech_scene01_01_0026_people_gap5_clean.mp4`.
+It produces 33 boxed frames concentrated in ranges 168-200 and 383-395; this is a
+better visual demo, not a new benchmark score.
+
 The frame-wise PatchCore model **cannot** do this: on the same fight clip it scored 44-56
 with no boxes. AI-VAD uses person detection, optical flow, pose, and CLIP features, which is
 why it catches the motion anomaly.

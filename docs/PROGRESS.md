@@ -149,6 +149,8 @@ Checkpoint: `results/patchcore/scene01/Patchcore/ShanghaiTech/v0/weights/lightni
   normal frames.
 - Initial gap 2/5/10 calibration is complete on independent scene-2/3 normal training
   footage; gap 5 produced image/region thresholds of 2.937/2.253 at the 99.5th percentile.
+- A cleaned gap-5 fight render is available with persistence and stricter thresholds:
+  `results/videos/shanghaitech_scene01_01_0026_people_gap5_clean.mp4`.
 - A provisional hard-negative screen over reviewed mask-zero intervals found higher
   walking/crowd maxima (4.288 image, 3.050 region at gap 5).
 - Pending: fit deployment-like gap checkpoints, finish interval review, refit with

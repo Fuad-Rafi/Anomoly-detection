@@ -335,6 +335,25 @@ results/videos/01_0026_people_samples/
   why the demo is cropped to the event.
 - This is a visualization result. It does not change the metric protocol.
 
+### E-003b — Gap-5 cleaned people-only render
+
+The original consecutive-frame demo was replaced with a deployment-like five-frame gap
+(0.5 seconds at 10 FPS), five-frame smoothing, and track persistence. Thresholds were
+raised to image **2.25** and box **2.0**; tracks required six qualifying hits in a
+ten-frame window, with a 1.7 stop threshold and 20-frame cooldown.
+
+| Item | Value |
+|---|---|
+| Output | `results/videos/shanghaitech_scene01_01_0026_people_gap5_clean.mp4` |
+| Frames / format | 500 frames, 856×480 @ 10 FPS |
+| Boxed frames | 33 |
+| Boxed ranges | 168-200 and 383-395 |
+| Max smoothed score | 4.0447 |
+| Score log | `results/videos/shanghaitech_scene01_01_0026_people_gap5_clean.scores.csv` |
+
+This render removes the earlier isolated walking boxes around seconds 6-8, but it is
+still a presentation result rather than a retrained gap-matched model evaluation.
+
 ---
 
 ## 4. Current hyperparameter table
