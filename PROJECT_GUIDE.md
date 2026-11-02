@@ -235,6 +235,10 @@ The downloaded archive contained these parts; all 7 sizes were verified before j
 - Produces per-region and per-frame anomaly scores.
 - Video-native: requires clips, not single frames.
 - Because it models motion, it is the natural counterpoint to PaDiM/PatchCore.
+- Product mode uses a deployment-matched frame gap, component diagnostics, IoU track
+  histories, persistence, hysteresis, and camera-specific thresholds.
+- AI-VAD is the prototype baseline, not a universal fight classifier; supervised event
+  verification may be added after false-positive calibration and hard-negative mining.
 
 ### 6.4 FUVAS (detail)
 
@@ -273,8 +277,9 @@ Raw videos
    |
    v
 [Temporal layer]
-  - Moving average / max over window
-  - Event segmentation (consecutive frames over threshold)
+  - Moving average / median over window
+  - IoU track histories and per-track score aggregation
+  - Persistence, hysteresis, debounce, and cooldown
   - Detection delay and false-alarm counting
    |
    v
@@ -633,7 +638,7 @@ Ablate the window size and the hysteresis margins.
 | 3 | All 13 ShanghaiTech scenes + Avenue | Pending |
 | 4a | FUVAS few-shot (k curve) | Pending |
 | 4b | WinCLIP zero-shot | Pending |
-| 5a | Temporal layer + event metrics | Pending |
+| 5a | Temporal layer + event metrics | Partial (AI-VAD gap, diagnostics, IoU tracks, persistence, and hysteresis implemented) |
 | 5b | Demo output | Partial (annotated MP4 rendered; Gradio UI pending) |
 | 5c | ONNX export + FPS benchmark | Pending |
 | 6 | Report, README results table, error analysis | Pending |
@@ -710,6 +715,8 @@ must subsample frames, reduce resolution, or stream metrics per video.
 - PatchCore scene 1 smoke test.
 - PaDiM and PatchCore on scenes 1–3.
 - AI-VAD on scenes 1–3.
+- AI-VAD gap experiment and held-out normal calibration.
+- Track-level false-alarm and event metrics.
 - First heatmaps and timelines.
 
 ### Phase 3 — Full benchmark

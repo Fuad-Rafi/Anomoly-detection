@@ -720,6 +720,19 @@ frame 263 is no longer boxed, while the fight boxes remain.
 
 This is a demonstration of the video-native branch of the project, not a benchmark result.
 
+### 9.7 Product-hardening decision
+
+The walking boxes before the fight showed why a product cannot treat each AI-VAD frame as an
+independent alarm. The next design keeps AI-VAD but adds a deployment-matched temporal gap,
+velocity/pose/deep diagnostics, per-person region scores, lightweight IoU tracking, rolling
+track histories, persistence, hysteresis, debounce, cooldown, and camera-specific calibration.
+The implementation is in `src/render_people_video.py`; held-out normal calibration is in
+`src/calibrate_people_thresholds.py`.
+
+This is deliberately a prototype architecture. AI-VAD can flag unusual behavior, but a
+reliable “fight detector” may still require a supervised verifier trained with hard negatives
+such as walking, running, waving, crowds, and camera-specific motion.
+
 ---
 
 ## 10. Hyperparameters used (first run)
@@ -891,7 +904,7 @@ Important because AI-VAD is the first true video-native model in the lineup.
 - `src/render_video.py` and `src/render_people_video.py` are implemented; the general
   runner, `configs/`, and `app/` remain pending.
 - No PaDiM/FUVAS/WinCLIP benchmark runs yet; AI-VAD has a scene-1 fit and people-only demo.
-- No temporal layer.
+- Temporal product layer is implemented in the AI-VAD renderer; benchmark event metrics remain.
 - No Gradio demo.
 - No memory-safe full-test evaluation.
 - No hyperparameter ablations.

@@ -486,6 +486,39 @@ Initial plan: zero-shot, scales 2, then prompt/scale ablation.
 - Hysteresis and debounce.
 - Measure false alarms per minute and detection delay.
 
+### T13 — AI-VAD product-hardening protocol
+
+This is the next controlled experiment rather than a new model benchmark:
+
+1. Fit AI-VAD with deployment-like gaps (2, 5, and 10 frames), not only the original
+   stride-100 preparation.
+2. Score the same normal-walking and fight clips with matching inference gaps.
+3. Compare raw image score, velocity, pose, deep, and per-region score distributions.
+4. Apply IoU track histories with a rolling median, six-of-ten persistence, hysteresis,
+   debounce, and cooldown.
+5. Select thresholds from held-out normal footage at a target false-alert rate.
+6. Mine false-positive walking/crowd clips and refit, then repeat the measurement.
+
+The renderer exposes the first implementation:
+
+```powershell
+.\.venv\Scripts\python.exe src\render_people_video.py `
+  --clip 01_0026 --frame-gap 5 --track-window 10 --track-min-hits 6 `
+  --track-stop-hits 10 --cooldown-frames 30
+```
+
+Held-out calibration is separate from the fight demo:
+
+```powershell
+.\.venv\Scripts\python.exe src\calibrate_people_thresholds.py `
+  --frames-dir data\shanghaitech\testing\frames\NORMAL_CLIP `
+  --frame-gap 5 --output results\calibration\normal.json
+```
+
+The calibration output records the 99.5th percentile image, region, velocity, pose, and
+deep thresholds. It must be generated from normal footage not used to fit the density
+estimators.
+
 ---
 
 ## 6. Planned experiment matrix

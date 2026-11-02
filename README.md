@@ -8,7 +8,7 @@ web demo.
 > something strange happens (someone runs, fights, or a bike appears where it should not),
 > it should shout "weird!" and mark where.
 
-**Status:** 2026-11-02 — environment ready and first real result obtained.
+**Status:** 2026-11-02 — AI-VAD product-hardening pass in progress.
 All three datasets are downloaded and prepared. PatchCore on ShanghaiTech scene 1 gives
 **image AUROC 0.785 / pixel AUROC 0.989** (subsampled evaluation, see below).
 
@@ -97,6 +97,24 @@ results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4
 The frame-wise PatchCore model **cannot** do this: on the same fight clip it scored 44-56
 with no boxes. AI-VAD uses person detection, optical flow, pose, and CLIP features, which is
 why it catches the motion anomaly.
+
+### Product-hardening direction
+
+The prototype now treats AI-VAD as a per-person temporal signal rather than an independent
+per-frame alarm. The renderer supports a configurable frame gap, logs velocity/pose/deep
+components and per-person scores, associates boxes with lightweight IoU tracks, and applies
+track persistence before drawing an alert. Thresholds should be calibrated on held-out normal
+walking footage:
+
+```powershell
+.\.venv\Scripts\python.exe src\calibrate_people_thresholds.py `
+  --frames-dir data\shanghaitech\testing\frames\NORMAL_CLIP `
+  --frame-gap 5 --output results\calibration\normal.json
+```
+
+The next product validation target is fewer than 1--2 false alerts per camera-day while
+retaining high recall on labelled fights, falls, running, and trespassing events. ShanghaiTech
+is a research benchmark; deployment requires camera-specific normal footage and review.
 
 ## Environment (installed and verified)
 

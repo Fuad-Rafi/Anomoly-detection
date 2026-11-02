@@ -138,6 +138,19 @@ Checkpoint: `results/patchcore/scene01/Patchcore/ShanghaiTech/v0/weights/lightni
 - Results: one PatchCore scene-1 benchmark result plus a corrected AI-VAD scene-1 demo.
 - Next: implement the runner, then PaDiM scene 1 and the 3-scene comparison.
 
+### Product-hardening pass
+
+- AI-VAD now supports configurable temporal frame gaps instead of assuming consecutive
+  frames.
+- The renderer logs image, velocity, pose, deep, per-region, track-match, and active-track
+  values in its CSV.
+- Lightweight IoU tracks, rolling score histories, persistence, and hysteresis are wired in.
+- `src/calibrate_people_thresholds.py` produces camera-specific thresholds from held-out
+  normal frames.
+- Next validation: fit deployment-like gaps (2/5/10), calibrate on normal walking, mine
+  hard negatives, and report false alerts per camera-day, event recall, localization,
+  latency, and FPS.
+
 ## Immediate next actions
 
 1. [ ] Create `requirements.txt` from the verified environment.

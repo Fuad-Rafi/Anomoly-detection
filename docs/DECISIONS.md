@@ -275,6 +275,20 @@ made, and its consequences. Status values: **Accepted**, **Superseded**, **Provi
 
 ## Superseded / changed decisions
 
+## D-21 — Harden AI-VAD as a track-level CCTV prototype
+
+- **Date:** 2026-11-02
+- **Status:** Accepted
+- **Context:** Frame-level AI-VAD boxes can briefly appear on normal walking before
+  returning to a fight. A product needs stable identities and alerts, not isolated boxes.
+- **Decision:** Keep AI-VAD as the baseline, but align its input frame gap with deployment,
+  log velocity/pose/deep components, associate detections with lightweight IoU tracks, and
+  apply track-level persistence, hysteresis, debounce, cooldown, and held-out calibration.
+- **Consequences:** The renderer becomes more suitable for CCTV iteration without discarding
+  the current checkpoint. A tracker is intentionally lightweight for the prototype; ByteTrack
+  or BoT-SORT can replace it later. AI-VAD remains an unusual-behavior detector, not a
+  guaranteed fight classifier.
+
 | Original | Replaced by | Reason |
 |---|---|---|
 | Industrial image anomaly detection on MVTec-AD | Video anomaly detection on ShanghaiTech/Avenue/UCSD | User wanted video; MVTec has no video |

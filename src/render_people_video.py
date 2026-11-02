@@ -17,13 +17,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
 from anomalib.models import AiVad
+from anomalib.models.video.ai_vad.features import FeatureType
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CKPT = (
@@ -47,6 +50,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-area", type=int, default=1200)
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--smooth-window", type=int, default=15)
+    parser.add_argument(
+        "--frame-gap",
+        type=int,
+        default=1,
+        help="Frames between the first and last AI-VAD input frames",
+    )
+    parser.add_argument("--track-iou", type=float, default=0.3)
+    parser.add_argument("--track-window", type=int, default=10)
+    parser.add_argument("--track-min-hits", type=int, default=6)
+    parser.add_argument("--track-stop-hits", type=int, default=10)
+    parser.add_argument("--track-stop-threshold", type=float, default=None)
+    parser.add_argument("--cooldown-frames", type=int, default=30)
     parser.add_argument("--start-frame", type=int, default=1)
     parser.add_argument("--end-frame", type=int, default=0)
     parser.add_argument("--device", default="cuda")
@@ -77,14 +92,31 @@ def infer_pair(model: AiVad, first_bgr: np.ndarray, last_bgr: np.ndarray, device
             flow = model.model.flow_extractor(first_frame, last_frame)
             regions = model.model.region_extractor(first_frame, last_frame)
             features = model.model.feature_extractor(first_frame, flow, regions)
-            region_scores, image_scores = model.model.density_estimator(features[0])
+            feature_set = features[0]
+            estimator = model.model.density_estimator
+            component_scores = {}
+            score_parts = []
+            if estimator.use_velocity_features and feature_set[FeatureType.VELOCITY].numel():
+                score = estimator.velocity_estimator.predict(feature_set[FeatureType.VELOCITY])
+                component_scores["velocity"] = score
+                score_parts.append(score)
+            if estimator.use_deep_features and feature_set[FeatureType.DEEP].numel():
+                score = estimator.appearance_estimator.predict(feature_set[FeatureType.DEEP])
+                component_scores["deep"] = score
+                score_parts.append(score)
+            if estimator.use_pose_features and feature_set[FeatureType.POSE].numel():
+                score = estimator.pose_estimator.predict(feature_set[FeatureType.POSE])
+                component_scores["pose"] = score
+                score_parts.append(score)
+            region_scores = sum(score_parts)
+            image_scores = sum(score.max() for score in score_parts)
             anomaly_map = torch.amax(
                 regions[0]["masks"] * region_scores.view(-1, 1, 1, 1),
                 dim=0,
             )
     except IndexError:
         height, width = last_bgr.shape[:2]
-        return 1.0, np.zeros((height, width), dtype=np.float32), None, None
+        return 1.0, np.zeros((height, width), dtype=np.float32), None, None, {}
     score = float(image_scores.detach().cpu())
     anomaly_map = np.squeeze(anomaly_map)
     if anomaly_map.ndim != 2:
@@ -94,7 +126,45 @@ def infer_pair(model: AiVad, first_bgr: np.ndarray, last_bgr: np.ndarray, device
         anomaly_map.detach().float().cpu().numpy(),
         regions[0],
         region_scores.detach().float().cpu(),
+        {
+            name: values.detach().float().cpu()
+            for name, values in component_scores.items()
+        },
     )
+
+
+@dataclass
+class Detection:
+    x: int
+    y: int
+    w: int
+    h: int
+    score: float
+    track_id: int | None = None
+
+    @property
+    def box(self) -> tuple[int, int, int, int]:
+        return self.x, self.y, self.w, self.h
+
+
+@dataclass
+class Track:
+    track_id: int
+    detection: Detection
+    scores: list[float]
+    missed: int = 0
+    cooldown: int = 0
+    active: bool = False
+
+
+def iou(left: Detection, right: Detection) -> float:
+    x1 = max(left.x, right.x)
+    y1 = max(left.y, right.y)
+    x2 = min(left.x + left.w, right.x + right.w)
+    y2 = min(left.y + left.h, right.y + right.h)
+    intersection = max(0, x2 - x1) * max(0, y2 - y1)
+    union = left.w * left.h + right.w * right.h - intersection
+    return intersection / union if union else 0.0
 
 
 def person_boxes(
@@ -106,7 +176,7 @@ def person_boxes(
     cluster_radius: float,
     min_area: int,
     top_k: int,
-) -> list[tuple[int, int, int, int]]:
+) -> list[Detection]:
     if region is None or "boxes" not in region or len(region["boxes"]) == 0:
         return []
 
@@ -148,11 +218,87 @@ def person_boxes(
             selected.append(item)
 
     selected.sort(key=lambda item: (-item[0], -item[1]))
-    return [(x, y, w, h) for _, _, x, y, w, h in selected[:top_k]]
+    return [
+        Detection(x=x, y=y, w=w, h=h, score=score)
+        for score, _, x, y, w, h in selected[:top_k]
+    ]
+
+
+def update_tracks(
+    tracks: dict[int, Track],
+    detections: list[Detection],
+    next_id: int,
+    iou_threshold: float,
+    window: int,
+    min_hits: int,
+    stop_hits: int,
+    cooldown_frames: int,
+    detection_threshold: float,
+    stop_threshold: float,
+) -> tuple[dict[int, Track], int, list[Detection], int]:
+    unmatched_tracks = set(tracks)
+    unmatched_detections = set(range(len(detections)))
+    matches = []
+    for track_id, track in tracks.items():
+        best = max(
+            (
+                (iou(track.detection, detection), index)
+                for index, detection in enumerate(detections)
+                if index in unmatched_detections
+            ),
+            default=(0.0, -1),
+        )
+        if best[0] >= iou_threshold:
+            matches.append((track_id, best[1]))
+            unmatched_tracks.discard(track_id)
+            unmatched_detections.discard(best[1])
+
+    for track_id, detection_index in matches:
+        track = tracks[track_id]
+        detection = detections[detection_index]
+        track.detection = detection
+        track.scores = (track.scores + [detection.score])[-window:]
+        track.missed = 0
+        if track.cooldown:
+            track.cooldown -= 1
+        detection.track_id = track_id
+
+    for track_id in unmatched_tracks:
+        tracks[track_id].missed += 1
+        if tracks[track_id].cooldown:
+            tracks[track_id].cooldown -= 1
+    for detection_index in unmatched_detections:
+        detection = detections[detection_index]
+        tracks[next_id] = Track(next_id, detection, [detection.score])
+        detection.track_id = next_id
+        next_id += 1
+
+    for track_id in list(tracks):
+        if tracks[track_id].missed > stop_hits:
+            del tracks[track_id]
+
+    visible = []
+    for track in tracks.values():
+        if track.missed:
+            continue
+        track_score = float(np.median(track.scores))
+        hits = sum(score >= detection_threshold for score in track.scores)
+        if hits >= min_hits and track_score >= detection_threshold:
+            track.active = True
+        elif track.active and track_score < stop_threshold:
+            track.active = False
+        elif len(track.scores) >= window and hits == 0:
+            track.active = False
+        if track.missed > cooldown_frames:
+            track.active = False
+        if track.active and track.cooldown == 0:
+            visible.append(track.detection)
+    return tracks, next_id, visible, len(matches)
 
 
 def draw_overlay(frame, boxes, score, image_threshold):
-    for x, y, w, h in boxes:
+    for detection in boxes:
+        x, y, w, h = detection.box
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
     is_anomaly = score >= image_threshold and len(boxes) > 0
     label = "PEOPLE ANOMALY" if is_anomaly else "NORMAL"
@@ -180,6 +326,7 @@ def main() -> None:
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     csv_path = output.with_suffix(".scores.csv")
+    gap = max(1, args.frame_gap)
 
     writer = None
     if not args.score_only:
@@ -194,12 +341,13 @@ def main() -> None:
     print(f"checkpoint : {args.checkpoint}")
     print(f"clip       : {args.clip}  ({len(frame_paths)} frames)")
     print(f"device     : {device}")
+    print(f"frame gap  : {gap} frames ({gap / args.fps:.2f}s at {args.fps:g} fps)")
     if not args.score_only:
         print(f"output     : {output}")
         print(f"thresholds : image={args.image_threshold} box={args.box_threshold}")
     print(f"csv        : {csv_path}")
 
-    total = len(frame_paths) - 1
+    total = len(frame_paths) - gap
     start = max(1, args.start_frame)
     end = args.end_frame if args.end_frame > 0 else total
     end = min(end, total)
@@ -207,13 +355,16 @@ def main() -> None:
 
     rows = []
     history: list[float] = []
-    prev = cv2.imread(str(frame_paths[proc_start - 1]))
+    tracks: dict[int, Track] = {}
+    next_track_id = 1
+    prev = cv2.imread(str(frame_paths[proc_start - gap]))
     started = time.time()
 
     for idx in range(proc_start, end + 1):
         current = cv2.imread(str(frame_paths[idx]))
-        raw_score, anomaly_map, region, region_scores = infer_pair(
-            model, prev, current, device
+        first = cv2.imread(str(frame_paths[idx - gap]))
+        raw_score, anomaly_map, region, region_scores, component_scores = infer_pair(
+            model, first, current, device
         )
 
         if not history:
@@ -222,7 +373,7 @@ def main() -> None:
         history = history[-max(1, args.smooth_window) :]
         score = sum(history) / len(history)
 
-        boxes = person_boxes(
+        detections = person_boxes(
             anomaly_map,
             region,
             region_scores,
@@ -233,7 +384,21 @@ def main() -> None:
             args.top_k,
         )
         if score < args.image_threshold:
-            boxes = []
+            detections = []
+        tracks, next_track_id, boxes, matched = update_tracks(
+            tracks,
+            detections,
+            next_track_id,
+            args.track_iou,
+            max(1, args.track_window),
+            max(1, args.track_min_hits),
+            max(1, args.track_stop_hits),
+            max(0, args.cooldown_frames),
+            args.box_threshold,
+            args.track_stop_threshold
+            if args.track_stop_threshold is not None
+            else args.box_threshold * 0.85,
+        )
 
         rows.append(
             {
@@ -246,6 +411,42 @@ def main() -> None:
                 "label": "ANOMALY" if score >= args.image_threshold else "NORMAL",
                 "boxes": len(boxes),
                 "map_max": round(float(anomaly_map.max()), 4),
+                "velocity_max": round(
+                    float(component_scores["velocity"].max()), 4
+                )
+                if "velocity" in component_scores
+                else 0.0,
+                "pose_max": round(float(component_scores["pose"].max()), 4)
+                if "pose" in component_scores
+                else 0.0,
+                "deep_max": round(float(component_scores["deep"].max()), 4)
+                if "deep" in component_scores
+                else 0.0,
+                "active_track_ids": ",".join(
+                    str(detection.track_id) for detection in boxes
+                ),
+                "matched_tracks": matched,
+                "frame_gap": gap,
+                "region_scores": json.dumps(
+                    [round(float(value), 4) for value in region_scores.numpy()]
+                    if region_scores is not None
+                    else []
+                ),
+                "velocity_scores": json.dumps(
+                    [round(float(value), 4) for value in component_scores["velocity"].numpy()]
+                    if "velocity" in component_scores
+                    else []
+                ),
+                "pose_scores": json.dumps(
+                    [round(float(value), 4) for value in component_scores["pose"].numpy()]
+                    if "pose" in component_scores
+                    else []
+                ),
+                "deep_scores": json.dumps(
+                    [round(float(value), 4) for value in component_scores["deep"].numpy()]
+                    if "deep" in component_scores
+                    else []
+                ),
             }
         )
 
@@ -287,8 +488,8 @@ def main() -> None:
         score_by_frame = {int(row["frame_index"]): float(row["score"]) for row in rows}
         for idx in sorted(chosen):
             image = cv2.imread(str(frame_paths[idx]))
-            prev_frame = cv2.imread(str(frame_paths[idx - 1]))
-            _, anomaly_map, region, region_scores = infer_pair(
+            prev_frame = cv2.imread(str(frame_paths[idx - gap]))
+            _, anomaly_map, region, region_scores, _ = infer_pair(
                 model, prev_frame, image, device
             )
             score = score_by_frame.get(idx, 0.0)

@@ -323,6 +323,18 @@ appeared.
 
 ## Open technical issues (summary)
 
+## C-26 — Walking false positives before a fight
+
+- **Symptom:** Boxes appeared on walking people around seconds 6-8, then returned during
+  the fight.
+- **Likely causes:** Sparse stride-100 fitting, mismatch between training and inference
+  temporal gaps, per-frame decisions, and thresholds tuned on one demonstration clip.
+- **Fix direction:** Add `--frame-gap`, log component and region scores, use IoU track
+  histories with persistence and hysteresis, and calibrate on held-out normal walking data.
+- **Status:** Mitigation implemented in the renderer; calibration and hard-negative mining
+  remain product validation work.
+- **Lesson:** A CCTV alarm should be calibrated and scored per tracked subject over time.
+
 | Issue | Priority | Next action |
 |---|---|---|
 | Memory-safe full-test evaluation | High | Stream metrics per video or use two-tier evaluation |
