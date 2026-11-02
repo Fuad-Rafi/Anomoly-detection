@@ -1,0 +1,2 @@
+model,scene,train_sampling,test_sampling,image_AUROC,image_F1,pixel_AUROC,pixel_F1,notes
+patchcore,1,every_100th_train_frame,every_10th_test_frame,0.7853,0.6716,0.9887,0.5948,WRN50 layer2+3 coreset0.01 neighbors9 256px visualizer=False

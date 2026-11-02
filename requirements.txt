@@ -1,0 +1,23 @@
+# Verified environment (2026-11-02), Python 3.10.11
+#
+# IMPORTANT: install torch/torchvision from the CUDA index, not PyPI:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#
+# Video decoding (torchvision 0.26 -> torchcodec) also needs FFmpeg shared DLLs.
+# See PROJECT_GUIDE.md section 9 for the portable FFmpeg fix.
+
+torch==2.11.0
+torchvision==0.26.0
+anomalib==2.7.0
+gradio==6.31.0
+av==17.1.0
+torchcodec==0.16.0
+open-clip-torch==3.3.0
+opencv-python-headless==5.0.0.93
+scikit-learn==1.7.2
+scipy==1.15.3
+numpy==2.2.6
+pandas==2.3.3
+matplotlib==3.10.9
+tqdm==4.70.1
+onnxruntime

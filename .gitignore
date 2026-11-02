@@ -1,0 +1,48 @@
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Local datasets and downloaded archives
+data/
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+# Model weights and experiment checkpoints
+results/**/weights/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# Generated videos and sample images
+results/videos/*.mp4
+results/videos/*_samples/
+*.avi
+*.mov
+
+# Local multimedia/tool bundles
+tools/ffmpeg/
+
+# Logs, temporary files, and local reports
+*.log
+*.tmp
+*.crdownload
+*.html
+*.jsonl
+
+# Editor and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
