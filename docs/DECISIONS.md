@@ -300,6 +300,40 @@ made, and its consequences. Status values: **Accepted**, **Superseded**, **Provi
 - **Consequences:** The workflow avoids label leakage but requires interval review before any
   refit. Camera-specific thresholds remain necessary.
 
+## D-24 - Match AI-VAD training and inference gaps in real time
+
+- **Date:** 2026-11-03
+- **Status:** Accepted (supersedes the frame-count gap assumption in D-21)
+- **Context:** The gap-5 demo produced boxes on ordinary walkers and scored only 18% of
+  boxed frames on ground truth, while the gap-1 demo reached 94.5%. Investigation showed
+  that training clips contained consecutive frames (one-frame gap), and that training
+  videos are 24 fps while test frames are 10 fps.
+- **Alternatives:** Keep tuning display thresholds at gap 5; switch to gap 1; fit a
+  gap-matched checkpoint; resample all data to a common fps.
+- **Decision:** Fit AI-VAD with an exact within-clip frame step chosen to match the
+  inference gap in seconds. For scene 1, use a 5-frame step at 24 fps (0.208 s) with a
+  2-frame inference gap at 10 fps (0.2 s). Keep gap-1 rendering only for comparisons.
+- **Consequences:** New checkpoints per temporal setting; the custom indexer lives in
+  `src/fit_aivad_gap.py`. Gap-5 inference with the old gap-1 checkpoint is retired.
+
+## D-25 - Use pixel masks for per-person evaluation and a focus lock for display
+
+- **Date:** 2026-11-03
+- **Status:** Accepted
+- **Context:** Frame-level precision hid the real problem: a frame could be correctly
+  marked anomalous while the box sat on a walker. The dataset provides pixel masks, and
+  the renderer logs every person candidate.
+- **Alternatives:** Continue tuning frame-level thresholds; manually label person boxes;
+  train a supervised verifier first.
+- **Decision:** Use the pixel masks to label person candidates automatically for
+  **evaluation only** (box at least 25% covered by the mask, or containing at least 40% of
+  it). For display, add a temporal focus lock that prefers candidates near the current
+  event and rejects large jumps, plus a 90 px anchor radius so both fighters are boxed.
+- **Consequences:** Honest per-person numbers (0.888 precision / 0.812 recall on
+  `01_0026`) and a clean demo. Thresholds and focus radius are tuned on this clip, so the
+  numbers are an upper bound. Pixel masks are never used as model input. A supervised
+  verifier remains the next step for cross-camera reliability.
+
 ## D-23 - Do not claim fight detection from the current AI-VAD demo
 
 - **Date:** 2026-11-03

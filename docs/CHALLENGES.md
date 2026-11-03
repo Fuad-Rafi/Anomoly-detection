@@ -358,6 +358,56 @@ appeared.
 - **Lesson:** A second video is required before claiming that a presentation threshold
   solves the fight-versus-walking problem.
 
+## C-29 - Training and inference run at different frame rates and gaps
+
+- **Symptom:** The gap-5 fight render had only 6 of 33 boxed frames on ground-truth
+  anomaly frames (18% precision), while the gap-1 render had 86 of 91 (94.5%). The gap-5
+  boxes clustered at frames 168-200, before the fight starts at frame 278.
+- **Root cause:** Two mismatches compound:
+  1. Anomalib's `frames_between_clips` is the stride **between clips**, not the gap
+     **inside** a clip. Training therefore always used consecutive frames (one-frame gap),
+     while inference used a five-frame gap.
+  2. ShanghaiTech training videos are **24 fps**, but the extracted test frames are
+     **10 fps**. A five-frame gap is 0.21 s in training and 0.5 s at inference, so the
+     velocity features are roughly 12x out of distribution.
+- **Evidence:** Component logs at gap 5 show boxed frames with velocity median 1.06
+  (fight clip) and 1.84 (walking clip), versus 0.09 and 0.05 for unboxed frames. At gap 1,
+  every person's velocity score is ~0.005 (range squashed by training outliers with
+  velocity max 39-70), so velocity carries almost no signal.
+- **Fix:** Added `src/fit_aivad_gap.py`, which rewrites the clip table to sample exact
+  `(t, t + frame_step)` pairs and decodes only those two frames. The fit must be matched to
+  the inference frame rate in **real time**, not frame count.
+- **Status:** Gap-matched scene-1 checkpoint fitted (2,757 clips, step 5 at 24 fps =
+  0.208 s, inference gap 2 at 10 fps = 0.2 s) and robustly recalibrated. The final demo
+  still preferred the gap-1 checkpoint, whose velocity range behaved better on this clip.
+- **Lesson:** Match temporal features in seconds, not in frame indices; document the native
+  fps of every dataset split.
+
+## C-30 - Frame-level precision hid boxes on the wrong person
+
+- **Symptom:** A render could score 94.5% frame-level precision while a box sat on a
+  walker, because the frame was anomalous even if the selected person was not.
+- **Root cause:** Evaluation only compared the frame score to the frame mask; no per-person
+  ground truth was used.
+- **Fix:** Label every candidate box with the dataset's pixel mask (25% box coverage or 40%
+  mask containment) and report per-person precision/recall. Weighted-score AUC was 0.852,
+  but a fixed threshold still produced false boxes.
+- **Status:** Implemented in `src/evaluate_people_csv.py` and used in E-004.
+- **Lesson:** Evaluate the unit you draw; frame metrics cannot validate a box.
+
+## C-31 - A passing walker can steal the box for one or two frames
+
+- **Symptom:** At frames 324 and 329 a walker outscored the fighter and received the box,
+  even though the fighter pair was the persistent event.
+- **Root cause:** Per-frame argmax has no memory; pose/appearance scores are noisy enough
+  for a striding walker to win briefly.
+- **Fix:** Temporal focus lock: prefer a strong candidate within 140 px of the last event,
+  reject a candidate that jumps farther than 1.6x the radius, and add nearby people within
+  90 px so both fighters are boxed. Reset after 30 frames without an alert.
+- **Status:** Implemented; final demo has 98/98 boxed frames on GT and 0.888 per-person
+  precision.
+- **Lesson:** Event identity is a temporal property, not a per-frame score.
+
 | Issue | Priority | Next action |
 |---|---|---|
 | Memory-safe full-test evaluation | High | Stream metrics per video or use two-tier evaluation |

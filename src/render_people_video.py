@@ -43,13 +43,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frames-dir", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--fps", type=float, default=10.0)
-    parser.add_argument("--image-threshold", type=float, default=1.3)
-    parser.add_argument("--box-threshold", type=float, default=1.1)
-    parser.add_argument("--relative-threshold", type=float, default=0.95)
-    parser.add_argument("--cluster-radius", type=float, default=150.0)
+    parser.add_argument("--image-threshold", type=float, default=0.7)
+    parser.add_argument("--box-threshold", type=float, default=0.55)
+    parser.add_argument("--relative-threshold", type=float, default=0.75)
+    parser.add_argument("--motion-threshold", type=float, default=0.45)
+    parser.add_argument("--score-mode", choices=["weighted", "sum"], default="weighted")
+    parser.add_argument("--velocity-weight", type=float, default=0.6)
+    parser.add_argument("--pose-weight", type=float, default=0.25)
+    parser.add_argument("--deep-weight", type=float, default=0.15)
+    parser.add_argument("--cluster-radius", type=float, default=0.0)
+    parser.add_argument("--focus-radius", type=float, default=0.0)
+    parser.add_argument("--focus-ratio", type=float, default=0.8)
+    parser.add_argument("--focus-jump", type=float, default=1.6)
+    parser.add_argument("--focus-timeout", type=int, default=30)
     parser.add_argument("--min-area", type=int, default=1200)
     parser.add_argument("--top-k", type=int, default=3)
-    parser.add_argument("--smooth-window", type=int, default=15)
+    parser.add_argument("--smooth-window", type=int, default=5)
     parser.add_argument(
         "--frame-gap",
         type=int,
@@ -83,7 +92,23 @@ def to_tensor(frame_bgr: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
 
 
-def infer_pair(model: AiVad, first_bgr: np.ndarray, last_bgr: np.ndarray, device: str):
+def component_weights(args: argparse.Namespace) -> dict[str, float]:
+    if args.score_mode == "sum":
+        return {"velocity": 1.0, "pose": 1.0, "deep": 1.0}
+    return {
+        "velocity": args.velocity_weight,
+        "pose": args.pose_weight,
+        "deep": args.deep_weight,
+    }
+
+
+def infer_pair(
+    model: AiVad,
+    first_bgr: np.ndarray,
+    last_bgr: np.ndarray,
+    device: str,
+    weights: dict[str, float],
+):
     clip = torch.stack([to_tensor(first_bgr), to_tensor(last_bgr)]).unsqueeze(0).to(device)
     try:
         with torch.no_grad():
@@ -95,24 +120,30 @@ def infer_pair(model: AiVad, first_bgr: np.ndarray, last_bgr: np.ndarray, device
             feature_set = features[0]
             estimator = model.model.density_estimator
             component_scores = {}
-            score_parts = []
             if estimator.use_velocity_features and feature_set[FeatureType.VELOCITY].numel():
-                score = estimator.velocity_estimator.predict(feature_set[FeatureType.VELOCITY])
-                component_scores["velocity"] = score
-                score_parts.append(score)
+                component_scores["velocity"] = estimator.velocity_estimator.predict(
+                    feature_set[FeatureType.VELOCITY]
+                )
             if estimator.use_deep_features and feature_set[FeatureType.DEEP].numel():
-                score = estimator.appearance_estimator.predict(feature_set[FeatureType.DEEP])
-                component_scores["deep"] = score
-                score_parts.append(score)
+                component_scores["deep"] = estimator.appearance_estimator.predict(
+                    feature_set[FeatureType.DEEP]
+                )
             if estimator.use_pose_features and feature_set[FeatureType.POSE].numel():
-                score = estimator.pose_estimator.predict(feature_set[FeatureType.POSE])
-                component_scores["pose"] = score
-                score_parts.append(score)
-            if not score_parts:
+                component_scores["pose"] = estimator.pose_estimator.predict(
+                    feature_set[FeatureType.POSE]
+                )
+            if not component_scores:
                 height, width = last_bgr.shape[:2]
                 return 0.0, np.zeros((height, width), dtype=np.float32), None, None, {}
-            region_scores = sum(score_parts)
-            image_scores = sum(score.max() for score in score_parts)
+
+            region_scores = sum(
+                weights.get(name, 0.0) * values
+                for name, values in component_scores.items()
+            )
+            image_scores = sum(
+                weights.get(name, 0.0) * values.max()
+                for name, values in component_scores.items()
+            )
             anomaly_map = torch.amax(
                 regions[0]["masks"] * region_scores.view(-1, 1, 1, 1),
                 dim=0,
@@ -170,28 +201,32 @@ def iou(left: Detection, right: Detection) -> float:
     return intersection / union if union else 0.0
 
 
-def person_boxes(
+def score_persons(
     anomaly_map: np.ndarray,
     region: dict | None,
     region_scores: torch.Tensor | None,
-    threshold: float,
-    relative_threshold: float,
-    cluster_radius: float,
+    component_scores: dict[str, torch.Tensor],
     min_area: int,
-    top_k: int,
-) -> list[Detection]:
+) -> list[dict]:
+    """Score every detected person with the weighted and per-component scores."""
     if region is None or "boxes" not in region or len(region["boxes"]) == 0:
         return []
 
     height, width = anomaly_map.shape
-    scored = []
     boxes = region["boxes"].cpu().numpy()
-    scores = (
+    weighted = (
         region_scores.numpy()
         if region_scores is not None and len(region_scores) == len(boxes)
         else None
     )
-    for box_index, box in enumerate(boxes):
+    components = {
+        name: values.numpy()
+        for name, values in component_scores.items()
+        if len(values) == len(boxes)
+    }
+
+    candidates = []
+    for index, box in enumerate(boxes):
         x1, y1, x2, y2 = (int(value) for value in box)
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(width, x2), min(height, y2)
@@ -200,31 +235,109 @@ def person_boxes(
         area = (x2 - x1) * (y2 - y1)
         if area < min_area:
             continue
-        score = float(scores[box_index]) if scores is not None else float(
+        score = float(weighted[index]) if weighted is not None else float(
             anomaly_map[y1:y2, x1:x2].max()
         )
-        scored.append((score, area, x1, y1, x2 - x1, y2 - y1))
+        candidates.append(
+            {
+                "x": x1,
+                "y": y1,
+                "w": x2 - x1,
+                "h": y2 - y1,
+                "area": area,
+                "score": score,
+                "velocity": float(components["velocity"][index])
+                if "velocity" in components
+                else 0.0,
+                "pose": float(components["pose"][index])
+                if "pose" in components
+                else 0.0,
+                "deep": float(components["deep"][index])
+                if "deep" in components
+                else 0.0,
+            }
+        )
+    return candidates
 
-    if not scored:
-        return []
 
-    top_score, _, top_x, top_y, top_w, top_h = max(scored, key=lambda item: item[0])
-    top_cx, top_cy = top_x + top_w / 2, top_y + top_h / 2
-    cutoff = max(threshold, relative_threshold * top_score)
+def select_persons(
+    candidates: list[dict],
+    threshold: float,
+    relative_threshold: float,
+    motion_threshold: float,
+    cluster_radius: float,
+    top_k: int,
+    focus_center: tuple[float, float] | None = None,
+    focus_radius: float = 0.0,
+    focus_ratio: float = 0.8,
+    focus_jump: float = 1.6,
+    require_motion: bool = True,
+) -> tuple[list[Detection], tuple[float, float] | None]:
+    """Pick the people that deserve a box and return the new focus point.
+
+    A person is boxed only when their own score is high *and* their motion score
+    clears the motion threshold. When a focus point is active, a new high-scoring
+    person far from the current event is rejected; this stops a passing walker from
+    stealing the box from a fighter.
+    """
+    if not candidates:
+        return [], focus_center
+
+    if require_motion:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if candidate["velocity"] >= motion_threshold
+        ]
+    if not candidates:
+        return [], focus_center
+
+    top_score = max(candidate["score"] for candidate in candidates)
+    top = max(candidates, key=lambda candidate: candidate["score"])
+
+    if focus_center is not None and focus_radius > 0:
+        top_cx = top["x"] + top["w"] / 2
+        top_cy = top["y"] + top["h"] / 2
+        top_distance = ((top_cx - focus_center[0]) ** 2 + (top_cy - focus_center[1]) ** 2) ** 0.5
+
+        near = []
+        for candidate in candidates:
+            cx = candidate["x"] + candidate["w"] / 2
+            cy = candidate["y"] + candidate["h"] / 2
+            distance = ((cx - focus_center[0]) ** 2 + (cy - focus_center[1]) ** 2) ** 0.5
+            if distance <= focus_radius and candidate["score"] >= focus_ratio * top_score:
+                near.append(candidate)
+        if near:
+            top = max(near, key=lambda candidate: candidate["score"])
+        elif top_distance > focus_radius * focus_jump:
+            # The only strong candidate jumped away from the tracked event.
+            return [], focus_center
+
+    cutoff = max(threshold, relative_threshold * top["score"])
+    top_cx = top["x"] + top["w"] / 2
+    top_cy = top["y"] + top["h"] / 2
 
     selected = []
-    for item in scored:
-        score, _, x, y, w, h = item
-        cx, cy = x + w / 2, y + h / 2
-        near = ((cx - top_cx) ** 2 + (cy - top_cy) ** 2) ** 0.5 <= cluster_radius
-        if score >= cutoff or (near and score >= threshold):
-            selected.append(item)
+    for candidate in candidates:
+        if candidate["score"] < cutoff:
+            continue
+        if cluster_radius > 0:
+            cx = candidate["x"] + candidate["w"] / 2
+            cy = candidate["y"] + candidate["h"] / 2
+            distance = ((cx - top_cx) ** 2 + (cy - top_cy) ** 2) ** 0.5
+            if distance > cluster_radius and candidate is not top:
+                continue
+        selected.append(candidate)
 
-    selected.sort(key=lambda item: (-item[0], -item[1]))
-    return [
-        Detection(x=x, y=y, w=w, h=h, score=score)
-        for score, _, x, y, w, h in selected[:top_k]
-    ]
+    selected.sort(key=lambda candidate: (-candidate["score"], -candidate["area"]))
+    new_focus = (top_cx, top_cy) if selected else focus_center
+    return (
+        [
+            Detection(x=c["x"], y=c["y"], w=c["w"], h=c["h"], score=c["score"])
+            for c in selected[:top_k]
+        ],
+        new_focus,
+    )
 
 
 def update_tracks(
@@ -323,6 +436,7 @@ def main() -> None:
 
     device = args.device if torch.cuda.is_available() else "cpu"
     model = load_model(args.checkpoint, device)
+    weights = component_weights(args)
 
     output = args.output or (
         ROOT / "results/videos" / f"shanghaitech_scene{args.scene}_{args.clip}_people.mp4"
@@ -360,6 +474,8 @@ def main() -> None:
     history: list[float] = []
     tracks: dict[int, Track] = {}
     next_track_id = 1
+    focus_center: tuple[float, float] | None = None
+    last_focus_frame = -10_000
     prev = cv2.imread(str(frame_paths[proc_start - gap]))
     started = time.time()
 
@@ -367,7 +483,7 @@ def main() -> None:
         current = cv2.imread(str(frame_paths[idx]))
         first = cv2.imread(str(frame_paths[idx - gap]))
         raw_score, anomaly_map, region, region_scores, component_scores = infer_pair(
-            model, first, current, device
+            model, first, current, device, weights
         )
 
         if not history:
@@ -376,18 +492,31 @@ def main() -> None:
         history = history[-max(1, args.smooth_window) :]
         score = sum(history) / len(history)
 
-        detections = person_boxes(
+        candidates = score_persons(
             anomaly_map,
             region,
             region_scores,
+            component_scores,
+            args.min_area,
+        )
+        if idx - last_focus_frame > args.focus_timeout:
+            focus_center = None
+        detections, focus_center = select_persons(
+            candidates,
             args.box_threshold,
             args.relative_threshold,
+            args.motion_threshold,
             args.cluster_radius,
-            args.min_area,
             args.top_k,
+            focus_center=focus_center,
+            focus_radius=args.focus_radius,
+            focus_ratio=args.focus_ratio,
+            focus_jump=args.focus_jump,
         )
         if score < args.image_threshold:
             detections = []
+        elif detections:
+            last_focus_frame = idx
         tracks, next_track_id, boxes, matched = update_tracks(
             tracks,
             detections,
@@ -411,6 +540,7 @@ def main() -> None:
                 "raw_score": round(raw_score, 4),
                 "image_threshold": args.image_threshold,
                 "box_threshold": args.box_threshold,
+                "motion_threshold": args.motion_threshold,
                 "label": "ANOMALY" if score >= args.image_threshold else "NORMAL",
                 "boxes": len(boxes),
                 "map_max": round(float(anomaly_map.max()), 4),
@@ -449,6 +579,19 @@ def main() -> None:
                     [round(float(value), 4) for value in component_scores["deep"].numpy()]
                     if "deep" in component_scores
                     else []
+                ),
+                "candidates": json.dumps(
+                    [
+                        {
+                            "box": [c["x"], c["y"], c["w"], c["h"]],
+                            "area": c["area"],
+                            "score": round(c["score"], 4),
+                            "velocity": round(c["velocity"], 4),
+                            "pose": round(c["pose"], 4),
+                            "deep": round(c["deep"], 4),
+                        }
+                        for c in candidates
+                    ]
                 ),
             }
         )
@@ -492,18 +635,23 @@ def main() -> None:
         for idx in sorted(chosen):
             image = cv2.imread(str(frame_paths[idx]))
             prev_frame = cv2.imread(str(frame_paths[idx - gap]))
-            _, anomaly_map, region, region_scores, _ = infer_pair(
-                model, prev_frame, image, device
+            _, anomaly_map, region, region_scores, component_scores = infer_pair(
+                model, prev_frame, image, device, weights
             )
             score = score_by_frame.get(idx, 0.0)
-            boxes = person_boxes(
+            candidates = score_persons(
                 anomaly_map,
                 region,
                 region_scores,
+                component_scores,
+                args.min_area,
+            )
+            boxes, _ = select_persons(
+                candidates,
                 args.box_threshold,
                 args.relative_threshold,
+                args.motion_threshold,
                 args.cluster_radius,
-                args.min_area,
                 args.top_k,
             )
             if score < args.image_threshold:

@@ -112,6 +112,54 @@ Checkpoint: `results/patchcore/scene01/Patchcore/ShanghaiTech/v0/weights/lightni
 - Artifacts: `results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4`,
   `...scores.csv`, `results/videos/01_0026_people_samples/`.
 
+## 2026-11-03 — Session 3: fixing the walker boxes
+
+### Diagnosis
+
+- Re-scored both fight renders against the frame mask:
+  gap-5 had **6/33 boxed frames on GT (18.2%)**; gap-1 had **86/91 (94.5%)**.
+- The gap-5 boxes were mostly at frames 168-200, before the fight (GT 278-397).
+- Root causes: training clips used consecutive frames while inference used a gap of 5;
+  training videos are 24 fps but test frames are 10 fps, so the real-time gaps differed
+  by ~12x; velocity min-max normalisation was dominated by outliers (max 39-70).
+
+### New code
+
+- `src/fit_aivad_gap.py` — exact `(t, t+step)` clip indexer and gap-matched fit.
+- `src/recalibrate_aivad_norm.py` — robust percentile normalisation patched into the
+  checkpoint.
+- `src/evaluate_people_csv.py` — frame precision/recall and candidate distributions.
+- `src/tune_people_score.py` — offline weight/gate/threshold sweep.
+- `src/analyze_people_pairs.py`, `src/analyze_people_clusters.py`,
+  `src/analyze_cluster_tracks.py` — tested interaction heuristics.
+- `src/render_people_video.py` — weighted/sum scoring, per-person candidate logging,
+  anchor+radius selection, and temporal focus lock.
+
+### Gap-matched fit
+
+- Scene 1, 2,757 clips, step 5 at 24 fps (0.208 s), inference gap 2 at 10 fps (0.2 s).
+- 8,788 person detections; 34 min 30 s.
+- Robust normalisation from 496 regions: velocity max 43.24 (p99.5), deep 4.64,
+  pose 1.68.
+
+### Per-person evaluation
+
+- Pixel masks used to label 224 positive and 1,165 negative candidates in `01_0026`.
+- AUC: weighted score 0.852, pose 0.827, velocity 0.796, deep 0.594.
+- Score-only logistic regression reached 0.893 AUC on a temporal holdout, but a fixed
+  threshold still produced false boxes; temporal continuity was the missing cue.
+
+### Final demo
+
+- Focus lock: radius 140, ratio 0.8, cluster radius 90, relative 0.5, image 1.4,
+  box 1.0, smoothing 15, frames 260-397.
+- 138 frames, 856x480 @ 10 fps, 0.91 MB.
+- 98/98 boxed frames on GT (100% frame precision).
+- Per-person precision 0.888, recall 0.812, F1 0.848 (205 selected boxes).
+- First/last box 296/397; GT span 278-397; delay 18 frames.
+- Artifact: `results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4`.
+- Metrics: `results/aivad/scene01_people_demo_metrics.json`.
+
 ### Problems found
 
 - **RAM is only 7.9 GB (5.8 GB free).** Full test (11,894 frames) ran inference but AUROC
@@ -133,48 +181,53 @@ Checkpoint: `results/patchcore/scene01/Patchcore/ShanghaiTech/v0/weights/lightni
 
 - Environment: ready.
 - Data: ready (all three datasets).
-- Code: PatchCore and AI-VAD people-only renderers are implemented; the general runner,
-  Gradio app, and benchmark harness remain pending.
-- Results: one PatchCore scene-1 benchmark result plus a corrected AI-VAD scene-1 demo.
-- Next: implement the runner, then PaDiM scene 1 and the 3-scene comparison.
+- Code: PatchCore and AI-VAD renderers, gap-matched fitting, robust normalisation,
+  pixel-mask per-person evaluation, focus lock, and threshold tooling are implemented.
+  The general runner, Gradio app, and benchmark harness remain pending.
+- Results: one PatchCore scene-1 benchmark result plus a corrected AI-VAD scene-1 demo
+  with 98/98 boxed frames on GT and 0.888 per-person precision.
+- Next: run PaDiM scene 1, then the 3-scene comparison; fit per-scene AI-VAD models and
+  validate `03_0061` before claiming cross-camera reliability.
 
-### Product-hardening pass
+### Product-hardening status
 
-- AI-VAD now supports configurable temporal frame gaps instead of assuming consecutive
-  frames.
-- The renderer logs image, velocity, pose, deep, per-region, track-match, and active-track
-  values in its CSV.
-- Lightweight IoU tracks, rolling score histories, persistence, and hysteresis are wired in.
-- `src/calibrate_people_thresholds.py` produces camera-specific thresholds from held-out
-  normal frames.
-- Initial gap 2/5/10 calibration is complete on independent scene-2/3 normal training
-  footage; gap 5 produced image/region thresholds of 2.937/2.253 at the 99.5th percentile.
-- A cleaned gap-5 fight render is available with persistence and stricter thresholds:
-  `results/videos/shanghaitech_scene01_01_0026_people_gap5_clean.mp4`.
-- A second validation render, `03_0061`, produced 131 boxed frames, mostly during
-  ordinary walking (frames 76-174), confirming the false-positive issue generalizes.
-- A provisional hard-negative screen over reviewed mask-zero intervals found higher
-  walking/crowd maxima (4.288 image, 3.050 region at gap 5).
-- The issue is diagnosed but not solved: AI-VAD pose/deep scores are high for walking,
-  and tracking only stabilizes those detections. Pending: fit deployment-like gap
-  checkpoints, finish interval review, refit with confirmed hard negatives, and report
-  false alerts per camera-day, event recall, localization, latency, and FPS.
+- AI-VAD supports configurable temporal frame gaps; `src/fit_aivad_gap.py` builds exact
+  `(t, t + step)` pairs and `src/recalibrate_aivad_norm.py` applies percentile
+  normalisation.
+- The renderer logs image, velocity, pose, deep, per-region, candidate, track-match, and
+  active-track values; it supports weighted or sum scoring, anchor+radius selection, and
+  a temporal focus lock.
+- The earlier gap-5 "clean" render is **retracted**: it had 6/33 boxed frames on GT
+  (18.2%) because the checkpoint was fitted on gap-1 pairs. The gap/fps mismatch is
+  documented as C-29.
+- The final gap-1 focus-lock demo has 98/98 boxed frames on GT and per-person precision
+  0.888 / recall 0.812. This is a display result tuned on one clip, not a benchmark.
+- A second validation render, `03_0061`, still produces walking false positives with the
+  scene-1 model (131 boxed frames, mainly 76-174). Per-scene fitting or a supervised
+  verifier remains the honest next step for cross-camera use.
+- Held-out calibration and 99.5th-percentile thresholds from scene-2/3 normal footage
+  remain valid diagnostics, but camera-specific fitting is required before deployment.
 
 ## Immediate next actions
 
-1. [ ] Create `requirements.txt` from the verified environment.
+1. [x] Create `requirements.txt` from the verified environment.
 2. [ ] Implement `src/run.py` (config-driven datamodule + model + engine).
-3. [ ] Implement frame subsampling with per-scene target frames (avoid RAM blowup).
+3. [x] Implement frame subsampling for the PatchCore memory bank (runner/config support
+   still pending).
 4. [ ] Implement memory-safe evaluation (image AUROC full test, pixel AUROC on a sample,
    or streaming per-video metrics).
-5. [ ] Save/load checkpoints so evaluation does not require refitting.
+5. [x] Save/load checkpoints so evaluation does not require refitting (PatchCore and
+   AI-VAD checkpoints are saved).
 6. [ ] Run PaDiM on scene 1 with the same protocol.
-7. [ ] Run PaDiM + PatchCore on scenes 1-3 and build `results/summary.csv`.
-8. [~] Run AI-VAD on scenes 1-3 (scene 1 fit/demo done; scenes 2–3 pending).
-9. [ ] Add temporal smoothing + event metrics.
+7. [~] Build `results/summary.csv` (PatchCore scene 1 done; more rows pending).
+8. [~] Run AI-VAD on scenes 1-3 (scene 1 gap-1 and gap-5 fits done; scenes 2-3 pending).
+9. [x] Add temporal smoothing and per-person event metrics (event-level benchmarking still
+   pending).
 10. [ ] FUVAS few-shot, then WinCLIP zero-shot.
 11. [ ] Gradio demo, ONNX export, FPS table.
 12. [ ] Final report and README results table.
+13. [ ] Fit per-scene AI-VAD models and validate `03_0061`; add a supervised verifier if
+    walking false positives persist.
 
 ## Open questions
 

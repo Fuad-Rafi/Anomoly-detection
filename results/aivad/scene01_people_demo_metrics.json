@@ -1,0 +1,12 @@
+{
+  "clip": "01_0026",
+  "frames_rendered": 153,
+  "boxed_frames": 108,
+  "box_precision": 0.8878,
+  "box_recall": 0.8125,
+  "box_f1": 0.8485,
+  "first_boxed": 286,
+  "last_boxed": 397,
+  "gt_start": 278,
+  "gt_end": 397
+}

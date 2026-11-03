@@ -299,6 +299,10 @@ The model is blind to motion anomalies. A video-native model is required.
 
 ### Render result
 
+> **Historical note:** this E-003 render was superseded by E-004. The file path
+> `..._people_annotated.mp4` now contains the E-004 final render (138 frames), and the
+> sample folder now contains E-004 frames. The numbers below describe the earlier run.
+
 | Item | Value |
 |---|---|
 | Processed pairs | 176 (frames 245-420 for warmup) |
@@ -344,15 +348,18 @@ ten-frame window, with a 1.7 stop threshold and 20-frame cooldown.
 
 | Item | Value |
 |---|---|
-| Output | `results/videos/shanghaitech_scene01_01_0026_people_gap5_clean.mp4` |
+| Output | `results/videos/shanghaitech_scene01_01_0026_people_gap5_annotated.mp4` |
 | Frames / format | 500 frames, 856×480 @ 10 FPS |
 | Boxed frames | 33 |
 | Boxed ranges | 168-200 and 383-395 |
 | Max smoothed score | 4.0447 |
 | Score log | `results/videos/shanghaitech_scene01_01_0026_people_gap5_clean.scores.csv` |
 
-This render removes the earlier isolated walking boxes around seconds 6-8, but it is
-still a presentation result rather than a retrained gap-matched model evaluation.
+> **Correction (2026-11-03):** this render is **not** clean. Scoring it against the
+> frame mask gives only **6 of 33 boxed frames on ground truth (18.2%)**; most boxes are
+> at frames 168-200, before the fight starts. The cause is a training/inference gap
+> mismatch (see E-004 and C-29). The earlier gap-1 render scored 86 of 91 (94.5%).
+> Do not use this gap-5 result as evidence of improvement.
 
 ### E-003c - Second people-only validation video
 
@@ -373,6 +380,187 @@ false-positive case, not a clean anomaly demonstration.
 
 This confirms that stricter thresholds and tracking reduce some isolated boxes but do
 not solve the model-level walking false positives.
+
+### E-003d - What actually happened with the walking boxes
+
+The gap-5 render in E-003b was re-scored against the frame mask before being trusted:
+
+| Render | Boxed frames | On GT frames | Frame precision |
+|---|---:|---:|---:|
+| Gap-1 corrected render | 91 | 86 | **94.5%** |
+| Gap-5 "clean" render | 33 | 6 | **18.2%** |
+
+The gap-5 boxes cluster at frames 168-200, which is before the fight (GT 278-397).
+Component logs show why:
+
+| Clip | Boxed frames: velocity median | Unboxed: velocity median |
+|---|---:|---:|
+| `01_0026` fight, gap 5 | 1.06 | 0.09 |
+| `03_0061` walking, gap 5 | 1.84 | 0.05 |
+
+Velocity dominated the false alarms. At gap 1, every person's velocity score is about
+0.005 because the training normalizer's maximum is 39-70, so the motion signal is
+squashed. The mismatch is therefore both a gap problem and a normalization problem.
+
+---
+
+## 3.7 Experiment E-004 — Gap-matched AI-VAD and a clean people-only demo
+
+### Status
+
+Completed (visualization + per-person evaluation on one clip).
+
+### Why this experiment exists
+
+E-003 showed boxes on walkers. The user's complaint was specifically that boxes appeared
+on non-fighting people when the fight started. The goal was to produce a people-only
+video where boxes stay on the fighters, and to measure per-person accuracy instead of
+only frame-level accuracy.
+
+### Root causes identified
+
+1. **Clip gap mismatch.** Anomalib's `frames_between_clips` is the stride *between*
+   clips, not the gap *inside* a clip. Training always used consecutive frames, while
+   inference used gap 5.
+2. **Frame-rate mismatch.** ShanghaiTech training videos are **24 fps**; extracted test
+   frames are **10 fps**. A 5-frame gap is 0.21 s in training but 0.5 s at inference,
+   roughly 12x out of distribution for velocity.
+3. **Normalization outliers.** The velocity estimator's min-max range was dominated by a
+   few training pairs (max 39-70). At gap 1 the motion score collapsed to ~0.005 for
+   everyone, including the fighters.
+4. **Independent per-person selection.** Each person was scored alone, so a striding
+   walker could outscore a fighter who was being pushed or held.
+
+### Gap-matched fit
+
+`src/fit_aivad_gap.py` replaces the training indexer with an exact `(t, t + step)` table
+and decodes only those two frames.
+
+| Item | Value |
+|---|---|
+| Scene | 1 |
+| Training clips | 2,840 requested; 2,757 after edge filtering |
+| Within-clip step | 5 frames at 24 fps = **0.208 s** |
+| Between-clip stride | 25 |
+| Inference gap | 2 frames at 10 fps = **0.200 s** |
+| Person detections | 8,788 |
+| Fit time | **34 min 30 s** |
+| Checkpoint | `results/aivad/scene01_gap5/.../model.ckpt` (776.1 MB) |
+
+Robust normalization (`src/recalibrate_aivad_norm.py`) then replaced the min-max buffers
+with percentiles from 496 normal regions:
+
+| Component | Median | p95 | p99 | Chosen max |
+|---|---:|---:|---:|---:|
+| velocity | 3.95 | 21.83 | 36.32 | 43.24 (p99.5) |
+| deep | 3.05 | 4.09 | 4.59 | 4.64 |
+| pose | 0.49 | 1.05 | 1.43 | 1.68 |
+
+The robust checkpoint is `.../model_robust.ckpt`.
+
+### Per-person evaluation
+
+The dataset ships pixel masks, so each detected person box was labelled automatically:
+
+- positive if the box is at least 25% covered by the pixel mask, or contains at least
+  40% of the mask;
+- negative otherwise.
+
+This gives 224 positive and 1,165 negative candidates in `01_0026`.
+
+Per-candidate AUC:
+
+| Feature | AUC |
+|---|---:|
+| Weighted score (0.6 velocity + 0.25 pose + 0.15 deep) | **0.852** |
+| Pose | 0.827 |
+| Velocity | 0.796 |
+| Deep | 0.594 |
+| Box aspect ratio | 0.684 |
+| Best IoU with another person | 0.616 |
+| Nearest-person distance | 0.327 (lower = closer) |
+
+A score-only logistic regression reached 0.893 AUC on a temporal holdout, but a fixed
+threshold still produced many false boxes. The missing cue was **temporal continuity**.
+
+### Focus lock
+
+A passing walker can briefly outscore a fighter (frames 324 and 329 were examples). The
+renderer now keeps a focus point from the last boxed event:
+
+1. Pick the top-scoring person.
+2. If a focus point exists and a strong candidate (>= 0.8 x top score) is within 140 px,
+   prefer that candidate.
+3. If the top candidate jumped farther than 1.6 x the focus radius, reject the frame.
+4. Add nearby people within 90 px whose score is >= 0.5 x the top score, so both fighters
+   are boxed during a grapple.
+5. Reset focus after 30 frames without an alert.
+
+Offline sweep on the logged candidates selected:
+
+`focus radius 140`, `focus ratio 0.8`, `cluster radius 90`, `relative score 0.5`,
+`image threshold 1.4`, `box threshold 1.0`, `top-k 3`, `smoothing 15`.
+
+### Render comparison
+
+| Setting | Boxed frames | On GT | Frame precision | Notes |
+|---|---:|---:|---:|---|
+| Gap-5 old checkpoint | 33 | 6 | 18.2% | Retracted |
+| Gap-1, image 1.3, relative 0.9 | 111 | 99 | 89.2% | Boxed walkers at frame 272 |
+| Gap-1, image 1.5, relative 0.7 | 79 | 73 | 92.4% | Conservative, missed early fight |
+| Gap-1, image 1.4, relative 0.5, focus 140 | **98** | **98** | **100%** | Final demo |
+
+Per-person evaluation of the final selection before persistence:
+
+| Metric | Value |
+|---|---:|
+| Selected boxes | 205 |
+| True positives (pixel-mask overlap) | 182 |
+| False positives | 23 |
+| **Precision** | **0.888** |
+| **Recall** | **0.812** |
+| **F1** | **0.848** |
+
+The IoU tracker then removes early flicker: the first drawn box is frame **296** versus
+GT start 278 (18-frame / 1.8 s delay), and the last is 397 (exact GT end).
+
+### Final artifact
+
+| Item | Value |
+|---|---|
+| Video | `results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4` |
+| Clip / frames | `01_0026`, frames 260-397 |
+| Format | 856x480, 10 fps, 138 frames |
+| Size | 0.91 MB |
+| Boxed frames | 98 (all on GT) |
+| Box ranges | 296-322, 325-364, 366-374, 376-397 |
+| Max boxes | 3 |
+| Max smoothed score | 2.13 |
+| Scores | `results/videos/shanghaitech_scene01_01_0026_people_annotated.scores.csv` |
+| Per-person metrics | `results/aivad/scene01_people_demo_metrics.json` |
+| Samples | `results/videos/01_0026_people_samples/` |
+
+### What the video shows
+
+- Frames 260-295: people walking and the fighters approaching; no boxes.
+- Frames 296-397: red boxes on the two fighters; inspected frames 299, 315, 318, 324,
+  329, 333, 340, 349, 352, 357, 360, 380, 395 show no boxes on walkers.
+- Frame 324 is deliberately left unboxed when a walker jumps ahead of the focus point.
+
+### Caveats
+
+- Thresholds were tuned on this clip. Per-person precision is measured on the same clip,
+  so it is an upper bound, not a cross-camera result.
+- The demo is cropped to the labelled event (260-397). The detector's first box is 18
+  frames after the GT onset.
+- The final demo uses the **gap-1** checkpoint because its velocity range is still the
+  best-behaved on this clip. The gap-matched checkpoint improved motion scores but did
+  not beat gap 1 on per-person separation; it remains available for a proper gap-matched
+  benchmark.
+- Pixel masks were used for **evaluation only**, never as model input.
+- This is still an unsupervised detector with a display-level focus rule, not a trained
+  fight classifier. A supervised verifier remains the next step if cross-camera
+  reliability is required.
 
 ---
 
@@ -599,19 +787,25 @@ The interval-aware command is:
 | ID | Model | Data | Scene(s) | Purpose | Status |
 |---|---|---|---|---|---|
 | E-001 | PatchCore | ShanghaiTech | 1 | first real baseline | Done |
-| E-002 | PaDiM | ShanghaiTech | 1 | classical baseline | Planned |
-| E-003 | PatchCore | ShanghaiTech | 2, 3 | scene generalization | Planned |
-| E-004 | PaDiM | ShanghaiTech | 2, 3 | scene generalization | Planned |
-| E-005 | PatchCore | ShanghaiTech | 1 | memory-bank size ablation | Planned |
-| E-006 | PatchCore | ShanghaiTech | 1 | coreset ablation | Planned |
-| E-007 | PatchCore | ShanghaiTech | 1 | backbone/layer ablation | Planned |
-| E-008 | AI-VAD | ShanghaiTech | 1–3 | video-native baseline | Planned |
-| E-009 | FUVAS | ShanghaiTech | 1–3 | few-shot curve | Planned |
-| E-010 | WinCLIP | ShanghaiTech | 1–3 | zero-shot | Planned |
-| E-011 | all | ShanghaiTech | 1–13 | full benchmark | Planned |
-| E-012 | best | Avenue | all | cross-dataset | Planned |
-| E-013 | all | ShanghaiTech | 1–3 | temporal ablation | Planned |
-| E-014 | best | video demo | n/a | Gradio + ONNX FPS | Planned |
+| E-002 | PatchCore | ShanghaiTech | 1 | annotated truck demo video | Done |
+| E-003 | AI-VAD | ShanghaiTech | 1 | people-only demo (pre-hardening) | Done (superseded by E-004) |
+| E-004 | AI-VAD | ShanghaiTech | 1 | gap-matched fit, per-person eval, focus-lock demo | Done |
+| E-005 | PaDiM | ShanghaiTech | 1 | classical baseline | Planned |
+| E-006 | PatchCore | ShanghaiTech | 2, 3 | scene generalization | Planned |
+| E-007 | PaDiM | ShanghaiTech | 2, 3 | scene generalization | Planned |
+| E-008 | PatchCore | ShanghaiTech | 1 | memory-bank size ablation | Planned |
+| E-009 | PatchCore | ShanghaiTech | 1 | coreset ablation | Planned |
+| E-010 | PatchCore | ShanghaiTech | 1 | backbone/layer ablation | Planned |
+| E-011 | AI-VAD | ShanghaiTech | 1-3 | video-native benchmark | Planned |
+| E-012 | FUVAS | ShanghaiTech | 1-3 | few-shot curve | Planned |
+| E-013 | WinCLIP | ShanghaiTech | 1-3 | zero-shot | Planned |
+| E-014 | all | ShanghaiTech | 1-13 | full benchmark | Planned |
+| E-015 | best | Avenue | all | cross-dataset | Planned |
+| E-016 | all | ShanghaiTech | 1-3 | temporal ablation | Planned |
+| E-017 | best | video demo | n/a | Gradio + ONNX FPS | Planned |
+
+Demo experiments E-002 to E-004 were inserted after E-001; the remaining IDs are shifted
+by three from the original plan.
 
 ---
 

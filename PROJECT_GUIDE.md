@@ -1,9 +1,11 @@
 # Video Anomaly Detection — Complete Project Guide
 
-Last updated: 2026-11-02
+Last updated: 2026-11-03
 Owner: project workspace `F:\Developer Stack\ML vision`
 Status: environment ready (GPU verified); all three datasets prepared; first real PatchCore
-result on ShanghaiTech scene 1 obtained. Training runs continue from here.
+result on ShanghaiTech scene 1 obtained; corrected people-only AI-VAD demo delivered
+(98/98 boxed frames on ground truth, per-person precision 0.888). Training runs continue
+from here.
 
 ---
 
@@ -237,6 +239,12 @@ The downloaded archive contained these parts; all 7 sizes were verified before j
 - Because it models motion, it is the natural counterpoint to PaDiM/PatchCore.
 - Product mode uses a deployment-matched frame gap, component diagnostics, IoU track
   histories, persistence, hysteresis, and camera-specific thresholds.
+- Temporal gaps must be matched in **seconds**, not frame counts: ShanghaiTech training
+  videos are 24 fps and test frames are 10 fps. `src/fit_aivad_gap.py` builds exact
+  `(t, t + step)` pairs; `src/recalibrate_aivad_norm.py` replaces outlier-dominated
+  min-max normalisation with percentiles.
+- Display selection uses an anchor + 90 px radius so both fighters are boxed, plus a
+  140 px focus lock that rejects a passing person who briefly outscores the event.
 - AI-VAD is the prototype baseline, not a universal fight classifier; supervised event
   verification may be added after false-positive calibration and hard-negative mining.
 
@@ -634,12 +642,12 @@ Ablate the window size and the hysteresis margins.
 | 1c | Avenue data pipeline smoke test | Done (15,328 train / 15,324 test frames) |
 | 2a | PatchCore on scene 1 (real run) | Done (image AUROC 0.785, pixel AUROC 0.989) |
 | 2b | PaDiM + PatchCore on scenes 1–3 | Pending |
-| 2c | AI-VAD on scenes 1–3 | Partial (scene 1 fitted; corrected people-only 01_0026 demo rendered; scenes 2–3 pending) |
+| 2c | AI-VAD on scenes 1–3 | Partial (scene 1 fitted at gap 1 and gap 5; people-only `01_0026` demo corrected and evaluated per person; scenes 2–3 pending) |
 | 3 | All 13 ShanghaiTech scenes + Avenue | Pending |
 | 4a | FUVAS few-shot (k curve) | Pending |
 | 4b | WinCLIP zero-shot | Pending |
-| 5a | Temporal layer + event metrics | Partial (AI-VAD gap, diagnostics, IoU tracks, persistence, and hysteresis implemented) |
-| 5b | Demo output | Partial (annotated MP4 rendered; Gradio UI pending) |
+| 5a | Temporal layer + event metrics | Partial (AI-VAD gap, diagnostics, IoU tracks, persistence, hysteresis, focus lock, and pixel-mask per-person evaluation implemented) |
+| 5b | Demo output | Partial (two annotated MP4s rendered; Gradio UI pending) |
 | 5c | ONNX export + FPS benchmark | Pending |
 | 6 | Report, README results table, error analysis | Pending |
 
@@ -846,3 +854,4 @@ must subsample frames, reduce resolution, or stream metrics per video.
 | 2026-11-02 | Full journey set added: `docs/JOURNEY.md`, `docs/DECISIONS.md`, `docs/CHALLENGES.md`, `docs/EXPERIMENTS.md`; combined PDF built (`docs/Project_Journey.pdf`, 47 pages) |
 | 2026-11-02 | Annotated demo video rendered: `results/videos/shanghaitech_scene01_01_0136_annotated.mp4` (529 frames, 247 ANOMALY frames, max score 82.35); renderer `src/render_video.py` |
 | 2026-11-02 | AI-VAD fitted on scene 1 (738 clips, 2,262 person detections, 5:02); corrected people-only fight video rendered with density-estimator region scores: `results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4` (161 frames, 91 boxed) |
+| 2026-11-03 | Diagnosed gap/fps mismatch (24 fps training, 10 fps test); fitted gap-matched scene-1 checkpoint (2,757 clips, 8,788 detections, 34:30) and added percentile normalisation. Per-person pixel-mask evaluation and focus-lock selection. Final fight video: 138 frames, 98/98 boxed frames on GT, per-person precision 0.888 / recall 0.812. Retracted the gap-5 "clean" render (18.2% precision). |

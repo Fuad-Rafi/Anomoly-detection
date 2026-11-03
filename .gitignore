@@ -46,3 +46,8 @@ tools/ffmpeg/
 .idea/
 Thumbs.db
 Desktop.ini
+
+# Large generated / derived research artifacts
+literature review/pdfs/
+results/videos/diagnostics/
+*.npz

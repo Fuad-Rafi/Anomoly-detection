@@ -706,7 +706,7 @@ Two practical issues surfaced:
 2. **Causal smoothing tail:** the banner can lag the boxes; requiring at least one box fixed
    the mismatch.
 
-Output:
+Output (historical; the file was later replaced by the E-004 render):
 
 - `results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4`
 - 161 frames (260-420), 10 fps, 856×480, 1.1 MB
@@ -751,6 +751,68 @@ A second validation video, `03_0061`, was then rendered with the same settings. 
 walking. This confirmed that the remaining error is model-level: AI-VAD assigns high pose
 and deep anomaly scores to normal walking, while the tracker only preserves those scores.
 The issue is therefore diagnosed but not solved by thresholding or persistence alone.
+
+> **Correction (2026-11-03):** the gap-5 render described above was not clean. It had only
+> 6 of 33 boxed frames on ground truth (18.2%), because the checkpoint was fitted on
+> consecutive frames while inference used a five-frame gap. The gap-1 render was 86/91
+> (94.5%). The gap-5 presentation result is retracted; see section 9.8.
+
+### 9.8 Fixing the walker boxes: gap, normalisation, and focus
+
+The user reported that when the fight started, boxes also appeared on people who were
+not fighting. Reproducing it against the frame mask showed the gap-5 video was the bad
+one: 18.2% of boxed frames were on ground truth, and most boxes were before the fight.
+The gap-1 video was already 94.5%.
+
+Two mismatches explained it:
+
+1. Anomalib's `frames_between_clips` is the stride **between clips**, not the gap
+   **inside** a clip. Training therefore used consecutive frames, while inference used a
+   five-frame gap.
+2. ShanghaiTech training videos are **24 fps**, but test frames are **10 fps**. A five-frame
+   gap is 0.21 s in training and 0.5 s at inference, roughly 12x out of distribution for
+   the velocity estimator.
+
+Worse, the velocity estimator's min-max range was dominated by a few outlier training
+pairs (max 39-70). At gap 1 every person's velocity score was about 0.005, so motion was
+effectively removed from the decision.
+
+The fixes, in order:
+
+- **Gap-matched fitting.** `src/fit_aivad_gap.py` rewrites the clip table to exact
+  `(t, t + step)` pairs. A scene-1 checkpoint was fitted with a 5-frame step at 24 fps
+  (0.208 s), matching a 2-frame inference gap at 10 fps (0.2 s). It used 2,757 clips,
+  produced 8,788 person detections, and took 34 min 30 s.
+- **Robust normalisation.** `src/recalibrate_aivad_norm.py` replaced the min-max buffers
+  with percentiles from 496 normal regions. Velocity p99.5 was 43.2 instead of 71.3, so
+  the motion scores became usable.
+- **Pixel-mask evaluation.** The dataset's pixel masks were used to label each detected
+  person box automatically: positive if the box was at least 25% covered by the mask, or
+  contained at least 40% of it. This exposed per-person precision, which frame-level
+  metrics hide. Weighted score AUC was 0.852; pose 0.827; velocity 0.796; deep 0.594.
+- **Temporal focus lock.** A walker can outscore a fighter for one or two frames. The
+  renderer now keeps a focus point and prefers a strong candidate within 140 px, rejects
+  a candidate that jumps too far, and boxes nearby people within 90 px so both fighters
+  are marked during a grapple.
+
+The final render used the in-distribution gap-1 checkpoint with:
+image threshold 1.4, box threshold 1.0, relative 0.5, cluster radius 90, focus radius
+140, focus ratio 0.8, smoothing 15, and frames 260-397.
+
+Result:
+
+- 138 frames, 856x480 @ 10 fps, 0.91 MB.
+- 98 boxed frames, **all 98 on ground truth** (100% frame precision).
+- Per-person precision **0.888**, recall **0.812**, F1 **0.848** on 205 selected boxes.
+- First box 296 (GT start 278, 1.8 s delay), last box 397 (GT end).
+- Inspected frames 299, 315, 318, 324, 329, 333, 340, 349, 352, 357, 360, 380, 395:
+  boxes stay on the two fighters; the walkers on the right are not boxed.
+
+Artifact: `results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4`.
+
+This is a display-level improvement, not a new benchmark. Thresholds were tuned on this
+clip, and the demo is cropped to the labelled event. The honest next step for cross-camera
+reliability is a supervised verifier or a per-scene normal model, not another threshold.
 
 ---
 
