@@ -718,6 +718,8 @@ must subsample frames, reduce resolution, or stream metrics per video.
 - AI-VAD gap experiment and held-out normal calibration.
 - Initial scene-2/3 calibration and mask-zero walking/crowd hard-negative screening;
   final gap-matched fitting and hard-negative refit remain pending.
+- Second-video validation (`03_0061`) confirmed ordinary walking false positives; current
+  AI-VAD should not yet be described as a reliable fight detector.
 - Track-level false-alarm and event metrics.
 - First heatmaps and timelines.
 

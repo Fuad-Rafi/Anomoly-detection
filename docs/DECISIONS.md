@@ -300,6 +300,17 @@ made, and its consequences. Status values: **Accepted**, **Superseded**, **Provi
 - **Consequences:** The workflow avoids label leakage but requires interval review before any
   refit. Camera-specific thresholds remain necessary.
 
+## D-23 - Do not claim fight detection from the current AI-VAD demo
+
+- **Date:** 2026-11-03
+- **Status:** Accepted
+- **Context:** The gap-5 fight demo improved visually, but a second clip (`03_0061`)
+  produced many boxes on ordinary walking.
+- **Decision:** Describe AI-VAD as an unusual-human-behavior prototype until walking
+  hard-negative refitting and component ablation demonstrate reliable event separation.
+- **Consequences:** The current videos are evidence of pipeline behavior and failure modes,
+  not product-level fight-detection validation.
+
 | Original | Replaced by | Reason |
 |---|---|---|
 | Industrial image anomaly detection on MVTec-AD | Video anomaly detection on ShanghaiTech/Avenue/UCSD | User wanted video; MVTec has no video |

@@ -346,6 +346,18 @@ appeared.
   pending.
 - **Lesson:** A low-positive clip is not automatically a valid negative.
 
+## C-28 - Walking false positives generalize to a second video
+
+- **Symptom:** Gap-5 rendering of `03_0061` boxed ordinary walkers in 131 of 236 frames,
+  mainly frames 76-174.
+- **Evidence:** Representative rendered frames show walking people, while pose and deep
+  component scores remain high; velocity is not consistently dominant.
+- **Conclusion:** This is a model/calibration limitation, not primarily a tracker bug.
+- **Status:** Confirmed and documented; gap-matched refitting and component ablation remain
+  pending.
+- **Lesson:** A second video is required before claiming that a presentation threshold
+  solves the fight-versus-walking problem.
+
 | Issue | Priority | Next action |
 |---|---|---|
 | Memory-safe full-test evaluation | High | Stream metrics per video or use two-tier evaluation |

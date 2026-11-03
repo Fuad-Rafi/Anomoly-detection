@@ -746,6 +746,12 @@ boxed frames concentrated in 168-200 and 383-395, removing the earlier isolated 
 boxes around seconds 6-8. This improves the demo's stability but is not evidence of a
 new trained-model benchmark result.
 
+A second validation video, `03_0061`, was then rendered with the same settings. It produced
+131 boxed frames out of 236, mainly frames 76-174, and inspected frames showed ordinary
+walking. This confirmed that the remaining error is model-level: AI-VAD assigns high pose
+and deep anomaly scores to normal walking, while the tracker only preserves those scores.
+The issue is therefore diagnosed but not solved by thresholding or persistence alone.
+
 ---
 
 ## 10. Hyperparameters used (first run)

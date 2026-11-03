@@ -354,6 +354,26 @@ ten-frame window, with a 1.7 stop threshold and 20-frame cooldown.
 This render removes the earlier isolated walking boxes around seconds 6-8, but it is
 still a presentation result rather than a retrained gap-matched model evaluation.
 
+### E-003c - Second people-only validation video
+
+Clip `03_0061` was rendered with the same gap-5 settings to test generalization beyond
+the fight clip. The output contains 236 frames at 10 FPS; 131 frames have boxes, mainly
+frames 76-174. Sample frames show ordinary people walking, so this is a confirmed second
+false-positive case, not a clean anomaly demonstration.
+
+| Item | Value |
+|---|---|
+| Output | `results/videos/shanghaitech_scene03_03_0061_people_gap5.mp4` |
+| Score log | `results/videos/shanghaitech_scene03_03_0061_people_gap5.scores.csv` |
+| Frames / format | 236 frames, 856x480 @ 10 FPS |
+| Boxed frames | 131 |
+| Main boxed interval | 76-174 |
+| Maximum smoothed score | 7.4547 |
+| Settings | gap 5, smoothing 5, image 2.25, box 2.0, six-of-ten persistence |
+
+This confirms that stricter thresholds and tracking reduce some isolated boxes but do
+not solve the model-level walking false positives.
+
 ---
 
 ## 4. Current hyperparameter table

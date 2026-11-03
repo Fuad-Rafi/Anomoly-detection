@@ -151,11 +151,14 @@ Checkpoint: `results/patchcore/scene01/Patchcore/ShanghaiTech/v0/weights/lightni
   footage; gap 5 produced image/region thresholds of 2.937/2.253 at the 99.5th percentile.
 - A cleaned gap-5 fight render is available with persistence and stricter thresholds:
   `results/videos/shanghaitech_scene01_01_0026_people_gap5_clean.mp4`.
+- A second validation render, `03_0061`, produced 131 boxed frames, mostly during
+  ordinary walking (frames 76-174), confirming the false-positive issue generalizes.
 - A provisional hard-negative screen over reviewed mask-zero intervals found higher
   walking/crowd maxima (4.288 image, 3.050 region at gap 5).
-- Pending: fit deployment-like gap checkpoints, finish interval review, refit with
-  confirmed hard negatives, and report false alerts per camera-day, event recall,
-  localization, latency, and FPS.
+- The issue is diagnosed but not solved: AI-VAD pose/deep scores are high for walking,
+  and tracking only stabilizes those detections. Pending: fit deployment-like gap
+  checkpoints, finish interval review, refit with confirmed hard negatives, and report
+  false alerts per camera-day, event recall, localization, latency, and FPS.
 
 ## Immediate next actions
 

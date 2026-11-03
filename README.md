@@ -126,6 +126,11 @@ independent scene-2/3 normal training footage. A provisional screen of reviewed
 mask-zero walking/crowd intervals still reached 4.288/3.050, so these values are
 diagnostic only and hard-negative review plus camera-specific calibration remain required.
 
+Second-video validation confirms the limitation: `03_0061` produced 131 boxed frames out
+of 236, mostly on ordinary walkers. The current pipeline has diagnosed but not solved the
+problem; the next required work is component ablation and gap-matched AI-VAD refitting with
+confirmed walking/crowd hard negatives.
+
 ## Environment (installed and verified)
 
 | Item | Value |
