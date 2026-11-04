@@ -177,17 +177,146 @@ Checkpoint: `results/patchcore/scene01/Patchcore/ShanghaiTech/v0/weights/lightni
 
 ---
 
+## 2026-11-03 — Session 4: frame-rate robustness (Phase 0/1)
+
+### Harness
+
+- `src/temporal.py` — time-based sample planning, `gap = round(fps × Δt)`, effective-Δt
+  reporting, folder/video frame sources.
+- `src/aivad_core.py` — shared batched inference, scoring, selection, tracking.
+- `src/eval_aivad.py` — headless timestamped evaluator with per-unique-pair inference
+  cache, so 20/30 fps emulation costs the same GPU time as 10 fps.
+- `src/evaluate_fps.py` — source-frame alignment, Spearman/Pearson/KS, alarm and box
+  Jaccard, event matching, delay in seconds.
+- `src/calibrate_from_csv.py`, `src/report_fps.py`, `src/compare_golden.py`.
+- `tests/test_temporal.py`, `tests/test_alignment.py`, `tests/test_candidates.py` —
+  **30 tests pass**.
+- The renderer accepts `--source-fps`, `--target-dt`, and seconds-based temporal flags;
+  legacy frame-count behavior is preserved.
+
+### Bugs found by the golden guard
+
+1. The refactor passed the **last** frame to AI-VAD's feature extractor; Anomalib uses
+   the **first** frame for appearance/pose features and the last only for regions.
+2. Cached candidates were stored in CSV shape (`box`) but `select_persons` expects
+   `x/y/w/h`; the fix is covered by a regression test.
+
+### Calibration
+
+- Normal training video `01_001.avi`, 24 fps, same Δt, 90th percentile:
+  image 1.22996, box 1.2393, motion disabled.
+- Motion is disabled because the robust gap-5 checkpoint compresses velocity; per-Δt
+  motion calibration is Phase 2.
+
+### Invariance results (Δt = 0.2083 s)
+
+| Data | Comparison | Spearman | Alarm J | Box J | Delay |
+|---|---|---:|---:|---:|---:|
+| `01_0026` | 10 → 5 fps | 0.983 | 0.938 | 0.231 | −0.4 s |
+| `01_0026` | 10 → 20 fps | 0.999 | 0.994 | 1.000 | 0.0 s |
+| `01_0026` | 10 → 30 fps | 0.999 | 0.987 | 1.000 | 0.0 s |
+| `03_0061` | 10 → 5 fps | 0.996 | 0.991 | 0.839 | 0.0 s |
+| Avenue `01` | 25 → 10 fps (real 25 fps) | 0.987 | 1.000* | 0.765 | 0.0 s |
+| `01_0026` | Δt 0.208 → 0.05 s | 0.970 | 0.845 | 0.000 | +0.8 s |
+
+\* Saturated: all common Avenue frames alarm at the ShanghaiTech threshold.
+
+- **Pass:** full-rate invariance at fixed Δt (20/30 fps), including alarm timing and all
+  three events.
+- **Partial:** 5 fps keeps score/alarm agreement but loses box localization because it
+  sees half the frames.
+- `0.05 s` at 10 fps quantises to `0.1 s`; this is a Δt mismatch, not a high-fps win.
+- Artifacts: `docs/FPS_ROBUSTNESS.md`, `results/fps/report.md`, `results/fps/*.csv`,
+  per-run scores under `results/fps/<dataset>/<clip>/`.
+
+### Next
+
+Phase 2: Avenue 25 fps matched fits at gaps 1/2/5 (0.04/0.08/0.2 s), recalibrate
+percentiles and the motion gate per Δt, evaluate event recall/delay.
+
+---
+
+## 2026-11-04 — Session 5: real 25 fps Avenue demo
+
+### Code
+
+- `src/fit_aivad_gap.py` now supports `--dataset avenue` via an exact-gap
+  `AvenueClipsIndexer`, writes `fit_metadata.json`, and reports the true clip count.
+- `src/recalibrate_aivad_norm.py` generalized to Avenue.
+- `src/eval_aivad.py` gained `--render-output` / `--render-fps`; it draws boxes and a
+  score banner while writing the existing timestamped CSV.
+- `src/convert_avenue_labels.py` converts Avenue `*_label.mat` to frame-level `.npy`.
+- `tools/run_avenue_demo.ps1` runs fit → recalibrate → calibrate → render → evaluate.
+
+### Fit
+
+- 604 clips from 16 Avenue normal videos, gap 5 at 25 fps (**0.2 s**), stride 25.
+- 5,053 person detections; fit time ~5 min.
+- Robust normalization: velocity p1/p99.5 = −1.912 / 180.633, deep 0.503 / 4.482,
+  pose 0.022 / 1.940.
+
+### Demo
+
+- Clip `05.avi`, native 25 fps, 1,007 frames, GT span 468–785 (318 positives).
+- Calibration on `training_videos/01.avi` (0–20 s), 80th percentile:
+  image 1.9651, box 1.20128, motion disabled.
+- **138 boxed frames**, 128 on GT: box precision **0.928**, recall 0.402.
+- Frame alarms: precision **0.826**, recall 0.506, F1 0.628.
+- q90 was too sparse (38 boxed frames, all correct, recall 0.12), so q80 was used for a
+  visible demo.
+- Artifact: `results/videos/avenue_05_25fps_annotated.mp4` (640×360, 25 fps, 40.08 s).
+- Scores: `results/fps/avenue_demo/05/scores.csv`.
+
+### Second clip: 17.avi
+
+- 426 frames, 25 fps, GT positives 379 (span 0–425).
+- The q80 threshold from clip 05 produced **zero boxes**; a per-clip threshold
+  (image 1.70, box 1.00) was needed.
+- 333 boxed frames, 329 on GT: box precision **0.988**, recall 0.868.
+- Frame alarms: precision **0.951**, recall 0.918, F1 0.934.
+- Artifact: `results/videos/avenue_17_25fps_annotated.mp4` (640×360, 25 fps, 16.84 s).
+- Scores: `results/fps/avenue_demo/17/scores.csv`.
+- Lesson: a single Avenue threshold does not transfer across clips; per-clip/camera
+  calibration is required.
+
+### Blind unseen test: 01.avi
+
+- Fixed q80 threshold (image 1.9651, box 1.20128), no tuning on this clip.
+- 1,023 boxed frames / 1,434, only 293 on GT: box precision **0.286**, recall 0.718.
+- Frame alarm precision 0.319, recall 0.993, F1 0.483.
+- The blind video over-fires on normal people.
+- Blind artifact: `results/videos/avenue_01_25fps_annotated_blind.mp4`;
+  scores `results/fps/avenue_demo/01/scores_blind.csv`.
+- Label-informed rerender at image 2.20 / box 1.20: 366 boxed frames, 200 on GT,
+  box precision 0.546, recall 0.490; frame precision 0.540, recall 0.770, F1 0.635.
+- Tuned artifact: `results/videos/avenue_01_25fps_annotated.mp4`;
+  scores `results/fps/avenue_demo/01/scores.csv`.
+- Even the tuned version misses about half the anomalous frames.
+- Lesson: report blind first; the model is not calibrated for a new clip.
+
+### Next
+
+Use the Avenue fit pipeline for the Phase 2 Δt sweep (gaps 1/2/5), recalibrate the
+motion gate per Δt, and compare event recall/delay.
+
+---
+
 ## Current state
 
 - Environment: ready.
 - Data: ready (all three datasets).
 - Code: PatchCore and AI-VAD renderers, gap-matched fitting, robust normalisation,
-  pixel-mask per-person evaluation, focus lock, and threshold tooling are implemented.
-  The general runner, Gradio app, and benchmark harness remain pending.
-- Results: one PatchCore scene-1 benchmark result plus a corrected AI-VAD scene-1 demo
-  with 98/98 boxed frames on GT and 0.888 per-person precision.
-- Next: run PaDiM scene 1, then the 3-scene comparison; fit per-scene AI-VAD models and
-  validate `03_0061` before claiming cross-camera reliability.
+  pixel-mask per-person evaluation, focus lock, threshold tooling, and a timestamped
+  fps-aware AI-VAD evaluator are implemented. The general runner, Gradio app, and
+  full benchmark harness remain pending.
+- Results: one PatchCore scene-1 benchmark result, a corrected AI-VAD scene-1 demo
+  (98/98 boxed frames on GT, 0.888 per-person precision), Phase 1 frame-rate invariance
+  (20/30 fps match 10 fps at fixed Δt; 5 fps loses box localization), and a real 25 fps
+  Avenue demo (Avenue-fitted model, 138 boxed frames, box precision 0.928, recall 0.402).
+- Next: Phase 2 Avenue Δt sweep, then PaDiM scene 1 and the 3-scene comparison.
+- **Current focus:** frame-rate-robust detection. The fixed-Δt invariance half is done;
+  the open question is whether smaller Δt (0.04/0.08 s) improves fast-event detection.
+  See `RESEARCH_ROADMAP.md` §2b and `docs/FPS_ROBUSTNESS.md`.
 
 ### Product-hardening status
 
@@ -210,6 +339,8 @@ Checkpoint: `results/patchcore/scene01/Patchcore/ShanghaiTech/v0/weights/lightni
 
 ## Immediate next actions
 
+0. [ ] Phase 2: Avenue matched fits at Δt 0.04/0.08/0.2 s (gaps 1/2/5 at 25 fps),
+   recalibrate the motion gate per Δt, and evaluate event recall/delay.
 1. [x] Create `requirements.txt` from the verified environment.
 2. [ ] Implement `src/run.py` (config-driven datamodule + model + engine).
 3. [x] Implement frame subsampling for the PatchCore memory bank (runner/config support

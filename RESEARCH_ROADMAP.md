@@ -69,6 +69,41 @@ Ranked by fit with what you already have:
 **Decision gate:** run a 2-week feasibility spike on RQ-1 before committing. If the
 frame-rate failure reproduces on a second method (e.g. MNAD or ARVAD), commit to RQ-1.
 
+## 2b. Current focus — higher-frame-rate detection
+
+Standard CCTV runs at **25/30 fps**, high-end cameras at **50/60 fps**. The model is
+time-based (`Δt ≈ 0.2 s`), so it can run on any source *today* by choosing the gap that
+preserves the real-time window: `gap = round(source_fps × Δt)`.
+
+| Source fps | Frame gap for Δt = 0.2 s |
+|---:|---:|
+| 10 | 2 |
+| 15 | 3 |
+| 24 / 25 | 5 |
+| 30 | 6 |
+| 50 | 10 |
+| 60 | 12 |
+
+Two questions drive the next phase:
+
+- **Invariance (engineering):** does the detector behave identically at a fixed Δt across
+  10/25/30/60 fps? If yes, the model is temporally calibrated, not fps-dependent.
+- **Value of resolution (research):** does a smaller Δt at high fps improve fast-motion
+  detection (fights), or only add compute?
+
+Steps:
+
+1. Make the sampler fps-aware (`--source-fps` + `--target-dt` instead of `--frame-gap`).
+2. Build a multi-fps labelled evaluation set (same scene at 10/25/30/60 fps).
+3. Run the fixed-Δt invariance ablation (velocity distribution and AUC vs fps).
+4. Refit at smaller Δt (0.05 / 0.1 / 0.2 s) with `src/fit_aivad_gap.py` and compare.
+
+> **Status 2026-11-03:** steps 1 and 3 are done (`docs/FPS_ROBUSTNESS.md`). At
+> fixed Δt = 0.2083 s, 20/30 fps emulations match the 10 fps run (Spearman 0.999,
+> alarm Jaccard 0.987–0.994, zero delay); 5 fps keeps score/alarm agreement but loses
+> box localization. A real 25→10 fps Avenue comparison keeps ρ = 0.987. Remaining:
+> the matched Δt sweep on Avenue and genuine high-fps data (50/60 fps out of scope).
+
 ---
 
 ## 3. Phase plan

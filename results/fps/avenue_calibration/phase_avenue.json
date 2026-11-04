@@ -1,0 +1,16 @@
+{
+  "source_csv": "results\\fps\\avenue_calibration\\01.csv",
+  "quantile": 80.0,
+  "pairs": 496,
+  "frame_candidates": 4227,
+  "image_threshold": 1.9651,
+  "box_threshold": 1.2012800000000001,
+  "motion_threshold": 0.0,
+  "pose_threshold": 0.29638000000000003,
+  "deep_threshold": 0.78366,
+  "frame_score_p50": 1.74215,
+  "frame_score_max": 2.7384,
+  "candidate_score_p50": 0.9446,
+  "velocity_p50": 0.0296,
+  "velocity_max": 2.2094
+}

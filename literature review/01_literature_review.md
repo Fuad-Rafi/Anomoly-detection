@@ -116,7 +116,9 @@ Two of this project's empirical findings are genuine, under-explored entry point
 
 1. **Train/inference frame-rate & gap mismatch** silently breaks flow-based video AD
    (24 fps training vs 10 fps test ⇒ 12× out of distribution for AI-VAD's velocity
-   term). → RQ-1 in the roadmap.
+   term). → RQ-1 in the roadmap. The natural extension is **frame-rate invariance**:
+   standard CCTV runs 25/30 fps (high-end 50/60), so a detector should behave identically
+   at fixed Δt across fps, and the value of smaller Δt at high fps is an open question.
 2. **Frame-level AUROC hides per-person localization error** (a frame can be scored
    "anomalous" while the box sits on the wrong person). → RQ-2.
 

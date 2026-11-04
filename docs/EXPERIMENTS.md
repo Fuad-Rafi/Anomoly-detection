@@ -564,6 +564,177 @@ GT start 278 (18-frame / 1.8 s delay), and the last is 397 (exact GT end).
 
 ---
 
+## 3.8 Planned experiment E-005 - higher-frame-rate detection
+
+### Status
+
+Partially complete: the fixed-Δt invariance half is done in E-006. The Δt sweep
+(0.04/0.08/0.2 s) is Phase 2.
+
+### Questions
+
+1. **Invariance:** at a fixed `Δt ≈ 0.2 s`, does velocity-score distribution and
+   fight-vs-walk AUC stay constant across 10/25/30/60 fps?
+2. **Value of resolution:** does a smaller `Δt` (0.05/0.1 s) at high fps improve fast-motion
+   detection, or only add compute?
+
+### Protocol
+
+| Source fps | Gap for Δt = 0.2 s | Gap for Δt = 0.1 s |
+|---:|---:|---:|
+| 10 | 2 | 1 |
+| 25 | 5 | 2–3 |
+| 30 | 6 | 3 |
+| 60 | 12 | 6 |
+
+- Make the sampler fps-aware (`--source-fps` + `--target-dt`).
+- Build a multi-fps labelled eval set (same scene re-extracted / recorded at 10/25/30/60 fps).
+- Fixed-Δt ablation across fps (expect identical scores if temporally calibrated).
+- Refit at Δt = 0.05/0.1/0.2 s with `src/fit_aivad_gap.py` and compare AUC.
+
+### Metric
+
+Velocity/pose/deep component AUC and per-person pixel-mask precision vs Δt and vs fps.
+
+---
+
+## 3.9 Experiment E-006 - Frame-rate invariance at fixed Δt (Phase 1)
+
+### Status
+
+Completed 2026-11-03.
+
+### Setup
+
+- Checkpoint: scene-1 AI-VAD, gap 5 at 24 fps, `model_robust.ckpt` (Δt = 0.2083 s).
+- Sampler: `src/temporal.py`, `gap = round(source_fps × Δt)`, clamp ≥ 1.
+- Evaluator: `src/eval_aivad.py`, batched inference cached per unique frame pair.
+- Operating point: 90th percentile of normal training video `01_001.avi`; image
+  1.22996, box 1.2393, motion gate disabled (robust checkpoint compresses velocity).
+- Reference: 10 fps full clip. 20/30 fps runs process repeated pairs at the emulated
+  cadence while reusing cached inference.
+
+### Results
+
+| Data | Comparison | Frames | Spearman | Alarm J | Box J | Delay |
+|---|---|---|---:|---:|---:|---:|
+| `01_0026` | 10 → 5 fps | 252 | 0.983 | 0.938 | 0.231 | −0.4 s |
+| `01_0026` | 10 → 20 fps | 503 | 0.999 | 0.994 | 1.000 | 0.0 s |
+| `01_0026` | 10 → 30 fps | 503 | 0.999 | 0.987 | 1.000 | 0.0 s |
+| `03_0061` | 10 → 5 fps | 120 | 0.996 | 0.991 | 0.839 | 0.0 s |
+| Avenue `01` | 25 → 10 fps | 299 | 0.987 | 1.000* | 0.765 | 0.0 s |
+| `01_0026` | Δt 0.208 → 0.05 s | 503 | 0.970 | 0.845 | 0.000 | +0.8 s |
+
+\* Saturated: all common Avenue frames alarm at the ShanghaiTech threshold.
+
+### Interpretation
+
+- Full-rate invariance at fixed Δt passes: 20/30 fps reproduce the 10 fps ranking and
+  alarm timing; all three events match.
+- 5 fps keeps score/alarm agreement but loses box localization because it sees half
+  the frames and boxes are sparse.
+- `0.05 s` at 10 fps quantises to `0.1 s`; this is a Δt mismatch, not a high-fps win.
+- Avenue is the only real cross-fps source; its alarm threshold is not calibrated, so
+  only the score correlation is used.
+
+### Artifacts
+
+`docs/FPS_ROBUSTNESS.md`, `results/fps/*.csv`, `results/fps/report.md`, per-run
+scores under `results/fps/<dataset>/<clip>/`.
+
+### Bugs found by the golden guard
+
+1. The first refactor passed the last frame to AI-VAD's feature extractor; Anomalib
+   uses the first frame for appearance/pose features.
+2. Cached candidates were stored in CSV shape (`box`) but `select_persons` expects
+   `x/y/w/h`. A regression test now covers the internal shape.
+
+---
+
+## 3.10 Experiment E-007 - Real 25 fps Avenue demo
+
+### Status
+
+Completed 2026-11-04.
+
+### Setup
+
+- Model: AI-VAD, `persons_only=True`, gap 5 at 25 fps = 0.2 s.
+- Fit: 604 clips from 16 Avenue normal videos, stride 25; 5,053 detections.
+- Robust normalization: velocity p1/p99.5 = -1.912 / 180.633, deep 0.503 / 4.482,
+  pose 0.022 / 1.940.
+- Calibration: `training_videos/01.avi`, first 20 s, 80th percentile; image 1.9651,
+  box 1.20128, motion gate disabled.
+- Demo: `testing_videos/05.avi`, 1,007 frames, 25 fps, GT span 468-785 (318 positives).
+
+### Result
+
+| Metric | Value |
+|---|---:|
+| Boxed frames | 138 / 1,002 |
+| Boxed frames on GT | 128 |
+| Box precision | 0.928 |
+| Box recall | 0.402 |
+| Frame alarm precision / recall / F1 | 0.826 / 0.506 / 0.628 |
+| Boxed ranges | 599-658, 713-783, 808-819 |
+
+The 808-819 cluster is after the labelled event (false positives). A 90th-percentile
+operating point gave only 38 boxed frames (all correct, recall 0.12), so q80 was used
+for a visible demo.
+
+### Second clip
+
+`17.avi` (426 frames, GT positives 379, span 0-425) was rendered with a per-clip
+threshold (image 1.70, box 1.00), because the q80 threshold from clip 05 produced
+zero boxes. Result: 333 boxed frames, 329 on GT, box precision 0.988, recall 0.868;
+frame alarm precision 0.951, recall 0.918, F1 0.934.
+
+Artifact: `results/videos/avenue_17_25fps_annotated.mp4` (640x360, 25 fps, 16.84 s),
+scores in `results/fps/avenue_demo/17/scores.csv`.
+
+This shows that one Avenue threshold does not transfer across clips; per-clip or
+camera-level calibration is required.
+
+### Blind unseen test: 01.avi
+
+Fixed q80 threshold (image 1.9651, box 1.20128), labels inspected only afterwards:
+
+| Metric | Value |
+|---|---:|
+| Boxed frames | 1,023 / 1,434 |
+| Boxed frames on GT | 293 |
+| Box precision | 0.286 |
+| Box recall | 0.718 |
+| Frame alarm precision / recall / F1 | 0.319 / 0.993 / 0.483 |
+
+The blind threshold over-fires on normal people. A label-informed sweep at image 2.20 /
+box 1.20 improves box precision to 0.54 and recall 0.50, but remains weak. This is
+evidence of cross-clip threshold failure, not a usable detector.
+
+Artifact: `results/videos/avenue_01_25fps_annotated_blind.mp4`, scores in
+`results/fps/avenue_demo/01/scores_blind.csv`.
+
+Label-informed rerender at image 2.20 / box 1.20: 366 boxed frames, 200 on GT, box
+precision 0.546, recall 0.490; frame precision 0.540, recall 0.770, F1 0.635. Artifact:
+`results/videos/avenue_01_25fps_annotated.mp4`, scores in
+`results/fps/avenue_demo/01/scores.csv`.
+
+Even the tuned version misses about half the anomalous frames; this is not a usable
+detector on this clip.
+
+### Artifact
+
+`results/videos/avenue_05_25fps_annotated.mp4` (640x360, 25 fps, 1,002 frames,
+40.08 s), scores in `results/fps/avenue_demo/05/scores.csv`.
+
+### Caveats
+
+Thresholds use Avenue **training** footage (in-sample), one clip only, and the motion
+gate is disabled. This is a real 25 fps demo, not a benchmark; 50/60 fps remains out
+of scope.
+
+---
+
 ## 4. Current hyperparameter table
 
 ### PatchCore

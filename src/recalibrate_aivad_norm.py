@@ -1,31 +1,46 @@
 """Replace AI-VAD's min-max score normalization with robust percentiles.
 
 Anomalib normalizes each density estimator with the minimum and maximum score seen
-during fitting. A handful of outlier training pairs (camera cuts, decode glitches)
+during fitting.  A handful of outlier training pairs (camera cuts, decode glitches)
 can push the maximum far above the normal range; the velocity estimator then maps
 both walking and fighting to almost zero, which makes the motion signal unusable.
 
 This script samples normal training clips, recomputes raw estimator scores, and
-patches the saved checkpoint's normalization buffers to robust percentiles.
+patches the saved checkpoint's normalization buffers to robust percentiles.  It works
+for both ShanghaiTech and Avenue.
 
 Examples:
     .\\.venv\\Scripts\\python.exe src\\recalibrate_aivad_norm.py `
         --checkpoint results/aivad/scene01_gap5/AiVad/ShanghaiTech/v0/weights/lightning/model.ckpt `
         --scene 1 --gap 5 --batches 80
+
+    .\\.venv\\Scripts\\python.exe src\\recalibrate_aivad_norm.py `
+        --dataset avenue --gap 5 `
+        --checkpoint results/aivad/avenue_gap5/AiVad/Avenue/v0/weights/lightning/model.ckpt
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
 import torch
-from anomalib.data import ShanghaiTech
+from anomalib.data import Avenue, ShanghaiTech
 from anomalib.models import AiVad
 from anomalib.models.video.ai_vad.features import FeatureType
 
-from fit_aivad_gap import gap_indexer_factory
+try:
+    from .fit_aivad_gap import (
+        avenue_gap_indexer_factory,
+        shanghaitech_gap_indexer_factory,
+    )
+except ImportError:  # script import
+    from fit_aivad_gap import (  # type: ignore[no-redef]
+        avenue_gap_indexer_factory,
+        shanghaitech_gap_indexer_factory,
+    )
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,30 +49,39 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--dataset", choices=["shanghaitech", "avenue"], default="shanghaitech")
     parser.add_argument("--scene", type=int, default=1)
     parser.add_argument("--gap", type=int, default=5)
     parser.add_argument("--stride", type=int, default=25)
+    parser.add_argument("--root", default=None)
+    parser.add_argument("--gt-dir", default=None)
     parser.add_argument("--batches", type=int, default=80)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--low-percentile", type=float, default=1.0)
     parser.add_argument("--high-percentile", type=float, default=99.5)
+    parser.add_argument("--device", default="cuda")
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    output = args.output or args.checkpoint.with_name("model_robust.ckpt")
+def build_datamodule(args: argparse.Namespace):
+    if args.dataset == "shanghaitech":
+        datamodule = ShanghaiTech(
+            root=args.root or "data/shanghaitech",
+            scene=args.scene,
+            clip_length_in_frames=2,
+            frames_between_clips=args.stride,
+            train_batch_size=args.batch_size,
+            eval_batch_size=args.batch_size,
+            num_workers=0,
+        )
+        datamodule.setup()
+        datamodule.train_data.indexer_cls = shanghaitech_gap_indexer_factory(args.gap)
+        datamodule.train_data._setup_clips()
+        return datamodule
 
-    model = AiVad.load_from_checkpoint(
-        str(args.checkpoint), map_location="cpu", post_processor=False
-    )
-    model.model.eval().to("cuda")
-    core = model.model
-    estimator = core.density_estimator
-
-    datamodule = ShanghaiTech(
-        root="data/shanghaitech",
-        scene=args.scene,
+    datamodule = Avenue(
+        root=args.root or "data/avenue",
+        gt_dir=args.gt_dir or "data/avenue/ground_truth_demo",
         clip_length_in_frames=2,
         frames_between_clips=args.stride,
         train_batch_size=args.batch_size,
@@ -65,8 +89,24 @@ def main() -> None:
         num_workers=0,
     )
     datamodule.setup()
-    datamodule.train_data.indexer_cls = gap_indexer_factory(args.gap)
+    datamodule.train_data.indexer_cls = avenue_gap_indexer_factory(args.gap)
     datamodule.train_data._setup_clips()
+    return datamodule
+
+
+def main() -> None:
+    args = parse_args()
+    output = args.output or args.checkpoint.with_name("model_robust.ckpt")
+
+    device = args.device if torch.cuda.is_available() else "cpu"
+    model = AiVad.load_from_checkpoint(
+        str(args.checkpoint), map_location="cpu", post_processor=False
+    )
+    model.model.eval().to(device)
+    core = model.model
+    estimator = core.density_estimator
+
+    datamodule = build_datamodule(args)
     loader = datamodule.train_dataloader()
 
     raw = {"velocity": [], "deep": [], "pose": []}
@@ -74,7 +114,7 @@ def main() -> None:
         for batch_index, batch in enumerate(loader):
             if batch_index >= args.batches:
                 break
-            clip = batch.image.to("cuda")
+            clip = batch.image.to(device)
             first, last = clip[:, 0], clip[:, -1]
             flow = core.flow_extractor(first, last)
             regions = core.region_extractor(first, last)
@@ -109,6 +149,7 @@ def main() -> None:
         raise SystemExit("No velocity scores collected")
 
     stats = {}
+    summary = {}
     raw_dump = {}
     for name, chunks in raw.items():
         if not chunks:
@@ -120,6 +161,20 @@ def main() -> None:
         stats[name] = (low, high)
         percentiles = {
             p: float(np.percentile(values, p)) for p in (50, 90, 95, 99, 99.5)
+        }
+        summary[name] = {
+            "n": len(values),
+            "min": float(values.min()),
+            "median": percentiles[50],
+            "p90": percentiles[90],
+            "p95": percentiles[95],
+            "p99": percentiles[99],
+            "p99_5": percentiles[99.5],
+            "max": float(values.max()),
+            "chosen_low": low,
+            "chosen_high": high,
+            "low_percentile": args.low_percentile,
+            "high_percentile": args.high_percentile,
         }
         print(
             f"{name:9s} n={len(values):7d} min={values.min():8.3f} "
@@ -133,6 +188,20 @@ def main() -> None:
         )
 
     np.savez(output.with_name("raw_scores.npz"), **raw_dump)
+    output.with_name("recalibration.json").write_text(
+        json.dumps(
+            {
+                "dataset": args.dataset,
+                "scene": args.scene if args.dataset == "shanghaitech" else None,
+                "gap": args.gap,
+                "stride": args.stride,
+                "batches": args.batches,
+                "stats": summary,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(f"raw scores : {output.with_name('raw_scores.npz')}")
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)

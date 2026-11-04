@@ -408,6 +408,103 @@ appeared.
   precision.
 - **Lesson:** Event identity is a temporal property, not a per-frame score.
 
+## C-32 - Higher frame rates need time-based, not index-based, sampling
+
+- **Symptom:** A fixed frame gap means a different real-time window on every camera (gap 5
+  = 0.2 s at 25 fps, 0.083 s at 60 fps). High-end CCTV at 50/60 fps would therefore be out
+  of distribution for a checkpoint fitted at 24 fps.
+- **Root cause:** The model's motion feature depends on Δt in seconds; frame indices are
+  meaningless across sources.
+- **Fix:** Sample by elapsed time (`gap = round(fps × Δt)`, `Δt ≈ 0.2 s`). This runs on any
+  source with the existing checkpoint. Exploiting smaller Δt at high fps still requires a
+  gap-matched refit.
+- **Status:** Implemented. Phase 1 verified fixed-Δt invariance across 10–30 fps
+  (`docs/FPS_ROBUSTNESS.md`); matched Δt refits remain Phase 2.
+- **Lesson:** For time-based models, the independent variable is seconds, never frame count.
+
+## C-33 - Refactor passed the wrong frame to AI-VAD's feature extractor
+
+- **Symptom:** The golden renderer comparison failed on every frame (pose/deep maxima and
+  raw scores diverged) after extracting `aivad_core.py`.
+- **Root cause:** The new batched path passed the **last** frame to the feature extractor.
+  Anomalib's AI-VAD uses the **first** frame for appearance/pose features and the last
+  frame only for region detection.
+- **Fix:** Use `first[nonempty]` for the feature extractor. The golden CSV then matched
+  exactly (49 frames, tolerance 1e-3).
+- **Status:** Fixed and guarded by the golden test.
+- **Lesson:** When reimplementing a model wrapper, mirror the upstream `forward` order
+  exactly and keep a numerical golden test.
+
+## C-34 - Cached candidates used the CSV shape instead of the internal shape
+
+- **Symptom:** `03_0061` crashed with `KeyError: 'x'` in `select_persons`; earlier
+  `01_0026` runs silently produced zero boxes.
+- **Root cause:** The inference cache stored candidates serialised as `{"box": [x,y,w,h]}`,
+  while the temporal selector expects `x/y/w/h`. On `01_0026` the old motion gate filtered
+  every candidate, hiding the bug.
+- **Fix:** Keep internal candidates in `x/y/w/h` form; serialise only when writing the CSV.
+  Added `tests/test_candidates.py`.
+- **Status:** Fixed; 30 tests pass.
+- **Lesson:** Separate the internal data model from the serialisation format, and test with
+  a candidate that actually passes the gate.
+
+## C-35 - Segment-only fps runs showed a boundary smoothing artifact
+
+- **Symptom:** The first 20/30 fps runs (restricted to 25–42 s) reported a −5.1 s first-alarm
+  offset against the full 10 fps reference.
+- **Root cause:** The segment run initialised its smoothing history at the segment start,
+  while the reference had 25 s of history. This is an evaluation-boundary effect, not a
+  frame-rate effect.
+- **Fix:** Rerun 20/30 on the full clip. Pair inference is cached, so the cost is the same;
+  the corrected runs show 0.0 s delay and 3/3 events matched.
+- **Status:** Fixed.
+- **Lesson:** Warm up temporal state on the same history when comparing segments; prefer
+  full-clip runs when inference is cached.
+
+## C-36 - Renderer wrapped to the last frame when gap > 1
+
+- **Symptom:** Adding `--target-dt` (gap 2 at 10 fps) made the renderer read
+  `frame_paths[-1]` for the first pair, because the loop started at index 1 while the
+  first-frame offset was `idx - gap`.
+- **Root cause:** The legacy renderer was written for gap 1, where `max(1, start - smooth)`
+  is sufficient. Larger gaps make the first index negative, which Python interprets as
+  the end of the list.
+- **Fix:** Start at `max(gap, ...)` for both `start` and `proc_start`, and fail clearly if
+  the clip is shorter than the gap. Gap-1 behavior is unchanged (golden test).
+- **Status:** Fixed; smoke-tested with `--target-dt 0.2083` (gap 2).
+- **Lesson:** Any index arithmetic that assumes gap 1 must be audited when the gap becomes
+  a runtime parameter.
+
+## C-37 - One Avenue threshold does not transfer across clips
+
+- **Symptom:** The q80 threshold calibrated on Avenue normal footage (image 1.9651,
+  box 1.20128) produced a usable clip-05 demo (138 boxed frames, precision 0.928) but
+  **zero boxes** on clip 17 (421 frames).
+- **Root cause:** Clip 17's candidate/frame scores are systematically lower (GT1
+  candidate median 0.921 vs 1.157 on clip 05). A percentile from one normal video does
+  not account for camera, lighting, crowd density, or event type.
+- **Fix/workaround:** Use a per-clip demo threshold on clip 17 (image 1.70, box 1.00):
+  333 boxed frames, 329 on GT, precision 0.988, recall 0.868. For deployment, calibrate
+  per camera/clip or normalize scores across clips.
+- **Status:** Demo workaround; cross-clip calibration is open for Phase 2.
+- **Lesson:** A single global threshold across cameras is unsafe; report it as a
+  limitation, not a universal operating point.
+
+## C-38 - Blind Avenue threshold over-fires on unseen clip 01
+
+- **Symptom:** With the fixed q80 operating point (image 1.9651, box 1.20128), Avenue
+  `01.avi` produced 1,023 boxed frames out of 1,434, only 293 on GT: box precision
+  **0.286**, recall 0.718; frame alarm precision 0.319, recall 0.993.
+- **Root cause:** The score distribution shifts across clips. Clip 01's GT/normal
+  candidate distributions overlap heavily (GT1 score median 1.175 vs GT0 1.129), so a
+  threshold calibrated on one normal video is too permissive here.
+- **Workaround:** A label-informed sweep at image 2.20 / box 1.20 gives 371 boxed
+  frames, 202 on GT (precision 0.54, recall 0.50) — better, but still weak.
+- **Status:** Open. Per-clip/camera calibration and a supervised verifier are required;
+  do not present the blind video as a success.
+- **Lesson:** Always report a blind unseen run before tuning; threshold transfer across
+  clips is not guaranteed.
+
 | Issue | Priority | Next action |
 |---|---|---|
 | Memory-safe full-test evaluation | High | Stream metrics per video or use two-tier evaluation |

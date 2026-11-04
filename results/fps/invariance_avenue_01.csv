@@ -1,0 +1,2 @@
+reference,run,frames,spearman,pearson,ks,median_ratio,score_mae,alarm_jaccard,box_jaccard,ref_alarm_frames,run_alarm_frames,ref_box_frames,run_box_frames,ref_events,run_events,event_matches,first_alarm_delta_s,last_alarm_delta_s
+fps25,fps10,299,0.986724513595819,0.9943741811236939,0.06688963210702341,1.0027831131668692,0.03368026755852844,1.0,0.7649572649572649,299,299,199,214,299,299,299,0.0,0.0

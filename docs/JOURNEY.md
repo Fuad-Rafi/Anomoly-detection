@@ -816,6 +816,26 @@ reliability is a supervised verifier or a per-scene normal model, not another th
 
 ---
 
+### 9.9 Current focus: higher-frame-rate detection
+
+The next question follows directly from the gap/fps discovery. Standard CCTV runs at
+**25/30 fps** (PAL/NTSC), with high-end cameras at **50/60 fps**. The model is time-based:
+it scores two frames separated by `Δt ≈ 0.2 s`, so on any source it should use
+`gap = round(fps × Δt)` (gap 2 at 10 fps, 5 at 24/25 fps, 6 at 30 fps, 12 at 60 fps).
+
+This splits into two questions:
+
+1. **Invariance (engineering):** does the detector behave identically at a fixed Δt across
+   fps? If so, the model is temporally calibrated, not fps-dependent.
+2. **Value of resolution (research):** does a smaller Δt at high fps improve fast-motion
+   detection (fights), or only add compute?
+
+The plan is an fps-aware sampler, a multi-fps labelled evaluation set (same scene at
+10/25/30/60 fps), a fixed-Δt invariance ablation, and a refit at smaller Δt (0.05/0.1/0.2 s)
+to test the value of temporal resolution. See `RESEARCH_ROADMAP.md` §2b.
+
+---
+
 ## 10. Hyperparameters used (first run)
 
 ### PatchCore

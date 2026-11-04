@@ -1,0 +1,16 @@
+{
+  "source_csv": "results\\fps\\calibration\\normal_01_001.csv",
+  "quantile": 90.0,
+  "pairs": 759,
+  "frame_candidates": 1221,
+  "image_threshold": 1.2299600000000004,
+  "box_threshold": 1.2393,
+  "motion_threshold": 0.0,
+  "pose_threshold": 0.3352,
+  "deep_threshold": 0.8478,
+  "frame_score_p50": 1.0977,
+  "frame_score_max": 1.7515,
+  "candidate_score_p50": 0.9572,
+  "velocity_p50": 0.0709,
+  "velocity_max": 0.917
+}

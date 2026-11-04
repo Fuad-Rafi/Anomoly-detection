@@ -1,0 +1,2 @@
+reference,run,frames,spearman,pearson,ks,median_ratio,score_mae,alarm_jaccard,box_jaccard,ref_alarm_frames,run_alarm_frames,ref_box_frames,run_box_frames,ref_events,run_events,event_matches,first_alarm_delta_s,last_alarm_delta_s,ref_auroc,run_auroc,ref_f1,ref_fa_per_min,run_f1,run_fa_per_min
+dt0p2083,dt0p05,503,0.970243057599648,0.9670680850897255,0.20278330019880716,0.9525452976704055,0.064358648111332,0.8451612903225807,0.0,155,131,20,4,3,4,1,0.8,-0.6,0.8839860748476938,0.8966057441253263,0.6472727272727273,78.88446215139443,0.6613545816733066,57.25646123260438

@@ -1,0 +1,16 @@
+{
+  "dataset": "avenue",
+  "scene": null,
+  "root": "data/avenue",
+  "train_fps": 25.0,
+  "gap": 5,
+  "effective_dt": 0.2,
+  "stride": 25,
+  "clip_length_in_frames": 2,
+  "batch_size": 2,
+  "num_workers": 0,
+  "training_clips": 604,
+  "detections": 5053,
+  "elapsed_s": 297.0564727783203,
+  "output_root": "results\\aivad\\avenue_gap5"
+}

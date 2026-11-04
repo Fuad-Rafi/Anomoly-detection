@@ -17,7 +17,12 @@ import cv2
 import numpy as np
 import torch
 
-from render_people_video import DEFAULT_CKPT, infer_pair, load_model
+try:
+    from .aivad_core import DEFAULT_CKPT, infer_pair, load_model
+    from .temporal import gap_for
+except ImportError:  # script import
+    from aivad_core import DEFAULT_CKPT, infer_pair, load_model  # type: ignore[no-redef]
+    from temporal import gap_for  # type: ignore[no-redef]
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-pairs-per-video", type=int, default=200)
     parser.add_argument("--sample-step", type=int, default=1)
     parser.add_argument("--frame-gap", type=int, default=1)
+    parser.add_argument("--source-fps", type=float, default=10.0)
+    parser.add_argument("--target-dt", type=float, default=None)
     parser.add_argument("--quantile", type=float, default=99.5)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, required=True)
@@ -43,7 +50,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    gap = max(1, args.frame_gap)
+    if args.target_dt is not None:
+        gap = gap_for(args.source_fps, args.target_dt)
+    else:
+        gap = max(1, args.frame_gap)
     if not args.frames_dir and not args.video and not args.video_glob and not args.interval:
         raise SystemExit("Provide --frames-dir, --video, or --video-glob")
 

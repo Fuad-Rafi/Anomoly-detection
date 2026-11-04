@@ -334,6 +334,22 @@ made, and its consequences. Status values: **Accepted**, **Superseded**, **Provi
   numbers are an upper bound. Pixel masks are never used as model input. A supervised
   verifier remains the next step for cross-camera reliability.
 
+## D-26 - Drive sampling by elapsed time, not frame index, for higher frame rates
+
+- **Date:** 2026-11-03
+- **Status:** Accepted (current focus)
+- **Context:** Standard CCTV runs 25/30 fps (PAL/NTSC), high-end cameras 50/60 fps. The
+  model scores two frames separated by Δt, so a fixed frame gap means different real-time
+  windows on different cameras.
+- **Alternatives:** Keep a fixed frame gap (breaks across fps); retrain per fps; upsample
+  low-fps data (corrupts flow).
+- **Decision:** Sample by elapsed time: `gap = round(fps × Δt)` with `Δt ≈ 0.2 s`. Treat
+  frame-rate invariance at fixed Δt as an engineering property to verify, and the value of
+  smaller Δt at high fps as a research question to measure.
+- **Consequences:** The renderer/loader needs an fps-aware sampler; evaluation needs a
+  multi-fps labelled set (ShanghaiTech test frames are 10 fps). Refits at smaller Δt go
+  through `src/fit_aivad_gap.py`.
+
 ## D-23 - Do not claim fight detection from the current AI-VAD demo
 
 - **Date:** 2026-11-03
@@ -344,6 +360,21 @@ made, and its consequences. Status values: **Accepted**, **Superseded**, **Provi
   hard-negative refitting and component ablation demonstrate reliable event separation.
 - **Consequences:** The current videos are evidence of pipeline behavior and failure modes,
   not product-level fight-detection validation.
+
+## D-27 - Scope frame-rate claims to 10-30 fps and make Δt a checkpoint property
+
+- **Date:** 2026-11-03
+- **Status:** Accepted
+- **Context:** ShanghaiTech testing is distributed as 10 fps frames; Avenue is real 25 fps;
+  there is no genuine 50/60 fps labelled footage locally. Phase 1 measured fixed-Δt
+  invariance and found 20/30 fps emulations match 10 fps (Spearman 0.999, alarm Jaccard
+  0.987-0.994, zero delay), while 5 fps loses box localization.
+- **Decision:** Claim 10-30 fps frame-rate parameterization only. Treat 20/30 fps as
+  sampler/cadence validation, Avenue 25 fps as the real cross-fps evidence, and leave
+  50/60 fps out of scope. Keep Δt as a checkpoint property: a checkpoint is valid only at
+  the Δt it was fitted on, and a sub-frame Δt quantises to `1/fps`.
+- **Consequences:** Phase 2 must refit at 0.04/0.08/0.2 s on Avenue and recalibrate the
+  motion gate per Δt. A genuine high-fps claim requires new data, not upsampling.
 
 | Original | Replaced by | Reason |
 |---|---|---|

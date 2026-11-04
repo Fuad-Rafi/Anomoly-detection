@@ -1,16 +1,23 @@
 """Render a people-only anomaly video with AI-VAD.
 
-AI-VAD is fitted with `persons_only=True`, so its anomaly map covers only person
-regions. This script runs consecutive-frame clips, thresholds the person anomaly
-map, and draws red boxes on anomalous people.
+AI-VAD is fitted with ``persons_only=True``, so its anomaly map covers only person
+regions.  This script runs frame pairs, thresholds the person anomaly map, and draws
+red boxes on anomalous people.
+
+The temporal window is defined in seconds (``--target-dt``).  The legacy
+``--frame-gap`` flag remains available and is used when ``--target-dt`` is omitted.
 
 Examples:
     # Calibration pass: scores only, no video
-    .\.venv\Scripts\python.exe src\render_people_video.py --scene 01 --clip 01_0026 --score-only
+    .\\.venv\\Scripts\\python.exe src\\render_people_video.py --scene 01 --clip 01_0026 --score-only
 
     # Render
-    .\.venv\Scripts\python.exe src\render_people_video.py --scene 01 --clip 01_0026 \
+    .\\.venv\\Scripts\\python.exe src\\render_people_video.py --scene 01 --clip 01_0026 \
         --image-threshold 1.2 --box-threshold 1.05
+
+    # Time-based invocation (Δt = 0.208 s at 10 fps -> gap 2)
+    .\\.venv\\Scripts\\python.exe src\\render_people_video.py --scene 01 --clip 01_0026 \
+        --source-fps 10 --target-dt 0.208 --smooth-seconds 1.5
 """
 
 from __future__ import annotations
@@ -19,20 +26,36 @@ import argparse
 import csv
 import json
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
-from anomalib.models import AiVad
-from anomalib.models.video.ai_vad.features import FeatureType
+
+try:  # package import (pytest / -m src...)
+    from .aivad_core import (
+        DEFAULT_CKPT,
+        component_weights,
+        infer_pair,
+        load_model,
+        score_persons,
+        select_persons,
+        update_tracks,
+    )
+    from .temporal import effective_dt, gap_for, seconds_to_frames
+except ImportError:  # script import (python src/render_people_video.py)
+    from aivad_core import (  # type: ignore[no-redef]
+        DEFAULT_CKPT,
+        component_weights,
+        infer_pair,
+        load_model,
+        score_persons,
+        select_persons,
+        update_tracks,
+    )
+    from temporal import effective_dt, gap_for, seconds_to_frames  # type: ignore[no-redef]
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CKPT = (
-    ROOT
-    / "results/aivad/scene01/AiVad/ShanghaiTech/v0/weights/lightning/model.ckpt"
-)
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,7 +65,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clip", default="01_0026")
     parser.add_argument("--frames-dir", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None)
-    parser.add_argument("--fps", type=float, default=10.0)
+    parser.add_argument("--fps", type=float, default=10.0, help="Output video fps")
+    parser.add_argument(
+        "--source-fps",
+        type=float,
+        default=10.0,
+        help="Native fps of the frame source (used for seconds conversion)",
+    )
+    parser.add_argument(
+        "--target-dt",
+        type=float,
+        default=None,
+        help="Temporal window in seconds; overrides --frame-gap",
+    )
     parser.add_argument("--image-threshold", type=float, default=0.7)
     parser.add_argument("--box-threshold", type=float, default=0.55)
     parser.add_argument("--relative-threshold", type=float, default=0.75)
@@ -56,21 +91,57 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--focus-ratio", type=float, default=0.8)
     parser.add_argument("--focus-jump", type=float, default=1.6)
     parser.add_argument("--focus-timeout", type=int, default=30)
+    parser.add_argument(
+        "--focus-timeout-seconds",
+        type=float,
+        default=None,
+        help="Override --focus-timeout with a duration",
+    )
     parser.add_argument("--min-area", type=int, default=1200)
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--smooth-window", type=int, default=5)
     parser.add_argument(
+        "--smooth-seconds",
+        type=float,
+        default=None,
+        help="Override --smooth-window with a duration",
+    )
+    parser.add_argument(
         "--frame-gap",
         type=int,
         default=1,
-        help="Frames between the first and last AI-VAD input frames",
+        help="Frames between the first and last AI-VAD input frames (legacy)",
     )
     parser.add_argument("--track-iou", type=float, default=0.3)
     parser.add_argument("--track-window", type=int, default=10)
+    parser.add_argument(
+        "--track-window-seconds",
+        type=float,
+        default=None,
+        help="Override --track-window with a duration",
+    )
     parser.add_argument("--track-min-hits", type=int, default=6)
+    parser.add_argument(
+        "--track-min-hits-seconds",
+        type=float,
+        default=None,
+        help="Override --track-min-hits with a duration",
+    )
     parser.add_argument("--track-stop-hits", type=int, default=10)
+    parser.add_argument(
+        "--track-stop-hits-seconds",
+        type=float,
+        default=None,
+        help="Override --track-stop-hits with a duration",
+    )
     parser.add_argument("--track-stop-threshold", type=float, default=None)
     parser.add_argument("--cooldown-frames", type=int, default=30)
+    parser.add_argument(
+        "--cooldown-seconds",
+        type=float,
+        default=None,
+        help="Override --cooldown-frames with a duration",
+    )
     parser.add_argument("--start-frame", type=int, default=1)
     parser.add_argument("--end-frame", type=int, default=0)
     parser.add_argument("--device", default="cuda")
@@ -79,337 +150,23 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_model(checkpoint: Path, device: str) -> AiVad:
-    model = AiVad.load_from_checkpoint(
-        str(checkpoint), map_location=device, post_processor=False
-    )
-    model.model.eval().to(device)
-    return model
+def _seconds_or_frames(args: argparse.Namespace) -> dict[str, int]:
+    """Resolve the temporal parameters, preferring the seconds-based flags."""
+    fps = args.source_fps
 
+    def resolve(seconds: float | None, frames: int) -> int:
+        if seconds is None:
+            return max(1, int(frames))
+        return max(1, seconds_to_frames(seconds, fps))
 
-def to_tensor(frame_bgr: np.ndarray) -> torch.Tensor:
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    return torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
-
-
-def component_weights(args: argparse.Namespace) -> dict[str, float]:
-    if args.score_mode == "sum":
-        return {"velocity": 1.0, "pose": 1.0, "deep": 1.0}
     return {
-        "velocity": args.velocity_weight,
-        "pose": args.pose_weight,
-        "deep": args.deep_weight,
+        "smooth": resolve(args.smooth_seconds, args.smooth_window),
+        "focus_timeout": resolve(args.focus_timeout_seconds, args.focus_timeout),
+        "cooldown": resolve(args.cooldown_seconds, args.cooldown_frames),
+        "track_window": resolve(args.track_window_seconds, args.track_window),
+        "min_hits": resolve(args.track_min_hits_seconds, args.track_min_hits),
+        "stop_hits": resolve(args.track_stop_hits_seconds, args.track_stop_hits),
     }
-
-
-def infer_pair(
-    model: AiVad,
-    first_bgr: np.ndarray,
-    last_bgr: np.ndarray,
-    device: str,
-    weights: dict[str, float],
-):
-    clip = torch.stack([to_tensor(first_bgr), to_tensor(last_bgr)]).unsqueeze(0).to(device)
-    try:
-        with torch.no_grad():
-            first_frame = clip[:, 0]
-            last_frame = clip[:, -1]
-            flow = model.model.flow_extractor(first_frame, last_frame)
-            regions = model.model.region_extractor(first_frame, last_frame)
-            features = model.model.feature_extractor(first_frame, flow, regions)
-            feature_set = features[0]
-            estimator = model.model.density_estimator
-            component_scores = {}
-            if estimator.use_velocity_features and feature_set[FeatureType.VELOCITY].numel():
-                component_scores["velocity"] = estimator.velocity_estimator.predict(
-                    feature_set[FeatureType.VELOCITY]
-                )
-            if estimator.use_deep_features and feature_set[FeatureType.DEEP].numel():
-                component_scores["deep"] = estimator.appearance_estimator.predict(
-                    feature_set[FeatureType.DEEP]
-                )
-            if estimator.use_pose_features and feature_set[FeatureType.POSE].numel():
-                component_scores["pose"] = estimator.pose_estimator.predict(
-                    feature_set[FeatureType.POSE]
-                )
-            if not component_scores:
-                height, width = last_bgr.shape[:2]
-                return 0.0, np.zeros((height, width), dtype=np.float32), None, None, {}
-
-            region_scores = sum(
-                weights.get(name, 0.0) * values
-                for name, values in component_scores.items()
-            )
-            image_scores = sum(
-                weights.get(name, 0.0) * values.max()
-                for name, values in component_scores.items()
-            )
-            anomaly_map = torch.amax(
-                regions[0]["masks"] * region_scores.view(-1, 1, 1, 1),
-                dim=0,
-            )
-    except IndexError:
-        height, width = last_bgr.shape[:2]
-        return 1.0, np.zeros((height, width), dtype=np.float32), None, None, {}
-    score = float(image_scores.detach().cpu())
-    anomaly_map = np.squeeze(anomaly_map)
-    if anomaly_map.ndim != 2:
-        raise RuntimeError(f"Unexpected anomaly map shape: {anomaly_map.shape}")
-    return (
-        score,
-        anomaly_map.detach().float().cpu().numpy(),
-        regions[0],
-        region_scores.detach().float().cpu(),
-        {
-            name: values.detach().float().cpu()
-            for name, values in component_scores.items()
-        },
-    )
-
-
-@dataclass
-class Detection:
-    x: int
-    y: int
-    w: int
-    h: int
-    score: float
-    track_id: int | None = None
-
-    @property
-    def box(self) -> tuple[int, int, int, int]:
-        return self.x, self.y, self.w, self.h
-
-
-@dataclass
-class Track:
-    track_id: int
-    detection: Detection
-    scores: list[float]
-    missed: int = 0
-    cooldown: int = 0
-    active: bool = False
-
-
-def iou(left: Detection, right: Detection) -> float:
-    x1 = max(left.x, right.x)
-    y1 = max(left.y, right.y)
-    x2 = min(left.x + left.w, right.x + right.w)
-    y2 = min(left.y + left.h, right.y + right.h)
-    intersection = max(0, x2 - x1) * max(0, y2 - y1)
-    union = left.w * left.h + right.w * right.h - intersection
-    return intersection / union if union else 0.0
-
-
-def score_persons(
-    anomaly_map: np.ndarray,
-    region: dict | None,
-    region_scores: torch.Tensor | None,
-    component_scores: dict[str, torch.Tensor],
-    min_area: int,
-) -> list[dict]:
-    """Score every detected person with the weighted and per-component scores."""
-    if region is None or "boxes" not in region or len(region["boxes"]) == 0:
-        return []
-
-    height, width = anomaly_map.shape
-    boxes = region["boxes"].cpu().numpy()
-    weighted = (
-        region_scores.numpy()
-        if region_scores is not None and len(region_scores) == len(boxes)
-        else None
-    )
-    components = {
-        name: values.numpy()
-        for name, values in component_scores.items()
-        if len(values) == len(boxes)
-    }
-
-    candidates = []
-    for index, box in enumerate(boxes):
-        x1, y1, x2, y2 = (int(value) for value in box)
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(width, x2), min(height, y2)
-        if x2 <= x1 or y2 <= y1:
-            continue
-        area = (x2 - x1) * (y2 - y1)
-        if area < min_area:
-            continue
-        score = float(weighted[index]) if weighted is not None else float(
-            anomaly_map[y1:y2, x1:x2].max()
-        )
-        candidates.append(
-            {
-                "x": x1,
-                "y": y1,
-                "w": x2 - x1,
-                "h": y2 - y1,
-                "area": area,
-                "score": score,
-                "velocity": float(components["velocity"][index])
-                if "velocity" in components
-                else 0.0,
-                "pose": float(components["pose"][index])
-                if "pose" in components
-                else 0.0,
-                "deep": float(components["deep"][index])
-                if "deep" in components
-                else 0.0,
-            }
-        )
-    return candidates
-
-
-def select_persons(
-    candidates: list[dict],
-    threshold: float,
-    relative_threshold: float,
-    motion_threshold: float,
-    cluster_radius: float,
-    top_k: int,
-    focus_center: tuple[float, float] | None = None,
-    focus_radius: float = 0.0,
-    focus_ratio: float = 0.8,
-    focus_jump: float = 1.6,
-    require_motion: bool = True,
-) -> tuple[list[Detection], tuple[float, float] | None]:
-    """Pick the people that deserve a box and return the new focus point.
-
-    A person is boxed only when their own score is high *and* their motion score
-    clears the motion threshold. When a focus point is active, a new high-scoring
-    person far from the current event is rejected; this stops a passing walker from
-    stealing the box from a fighter.
-    """
-    if not candidates:
-        return [], focus_center
-
-    if require_motion:
-        candidates = [
-            candidate
-            for candidate in candidates
-            if candidate["velocity"] >= motion_threshold
-        ]
-    if not candidates:
-        return [], focus_center
-
-    top_score = max(candidate["score"] for candidate in candidates)
-    top = max(candidates, key=lambda candidate: candidate["score"])
-
-    if focus_center is not None and focus_radius > 0:
-        top_cx = top["x"] + top["w"] / 2
-        top_cy = top["y"] + top["h"] / 2
-        top_distance = ((top_cx - focus_center[0]) ** 2 + (top_cy - focus_center[1]) ** 2) ** 0.5
-
-        near = []
-        for candidate in candidates:
-            cx = candidate["x"] + candidate["w"] / 2
-            cy = candidate["y"] + candidate["h"] / 2
-            distance = ((cx - focus_center[0]) ** 2 + (cy - focus_center[1]) ** 2) ** 0.5
-            if distance <= focus_radius and candidate["score"] >= focus_ratio * top_score:
-                near.append(candidate)
-        if near:
-            top = max(near, key=lambda candidate: candidate["score"])
-        elif top_distance > focus_radius * focus_jump:
-            # The only strong candidate jumped away from the tracked event.
-            return [], focus_center
-
-    cutoff = max(threshold, relative_threshold * top["score"])
-    top_cx = top["x"] + top["w"] / 2
-    top_cy = top["y"] + top["h"] / 2
-
-    selected = []
-    for candidate in candidates:
-        if candidate["score"] < cutoff:
-            continue
-        if cluster_radius > 0:
-            cx = candidate["x"] + candidate["w"] / 2
-            cy = candidate["y"] + candidate["h"] / 2
-            distance = ((cx - top_cx) ** 2 + (cy - top_cy) ** 2) ** 0.5
-            if distance > cluster_radius and candidate is not top:
-                continue
-        selected.append(candidate)
-
-    selected.sort(key=lambda candidate: (-candidate["score"], -candidate["area"]))
-    new_focus = (top_cx, top_cy) if selected else focus_center
-    return (
-        [
-            Detection(x=c["x"], y=c["y"], w=c["w"], h=c["h"], score=c["score"])
-            for c in selected[:top_k]
-        ],
-        new_focus,
-    )
-
-
-def update_tracks(
-    tracks: dict[int, Track],
-    detections: list[Detection],
-    next_id: int,
-    iou_threshold: float,
-    window: int,
-    min_hits: int,
-    stop_hits: int,
-    cooldown_frames: int,
-    detection_threshold: float,
-    stop_threshold: float,
-) -> tuple[dict[int, Track], int, list[Detection], int]:
-    unmatched_tracks = set(tracks)
-    unmatched_detections = set(range(len(detections)))
-    matches = []
-    for track_id, track in tracks.items():
-        best = max(
-            (
-                (iou(track.detection, detection), index)
-                for index, detection in enumerate(detections)
-                if index in unmatched_detections
-            ),
-            default=(0.0, -1),
-        )
-        if best[0] >= iou_threshold:
-            matches.append((track_id, best[1]))
-            unmatched_tracks.discard(track_id)
-            unmatched_detections.discard(best[1])
-
-    for track_id, detection_index in matches:
-        track = tracks[track_id]
-        detection = detections[detection_index]
-        track.detection = detection
-        track.scores = (track.scores + [detection.score])[-window:]
-        track.missed = 0
-        if track.cooldown:
-            track.cooldown -= 1
-        detection.track_id = track_id
-
-    for track_id in unmatched_tracks:
-        tracks[track_id].missed += 1
-        if tracks[track_id].cooldown:
-            tracks[track_id].cooldown -= 1
-    for detection_index in unmatched_detections:
-        detection = detections[detection_index]
-        tracks[next_id] = Track(next_id, detection, [detection.score])
-        detection.track_id = next_id
-        next_id += 1
-
-    for track_id in list(tracks):
-        if tracks[track_id].missed > stop_hits:
-            del tracks[track_id]
-
-    visible = []
-    for track in tracks.values():
-        if track.missed:
-            continue
-        track_score = float(np.median(track.scores))
-        hits = sum(score >= detection_threshold for score in track.scores)
-        if hits >= min_hits and track_score >= detection_threshold:
-            track.active = True
-        elif track.active and track_score < stop_threshold:
-            track.active = False
-        elif len(track.scores) >= window and hits == 0:
-            track.active = False
-        if track.missed > cooldown_frames:
-            track.active = False
-        if track.active and track.cooldown == 0:
-            visible.append(track.detection)
-    return tracks, next_id, visible, len(matches)
 
 
 def draw_overlay(frame, boxes, score, image_threshold):
@@ -434,16 +191,30 @@ def main() -> None:
     if len(frame_paths) < 2:
         raise SystemExit(f"Not enough frames in {frames_dir}")
 
+    if args.target_dt is not None:
+        gap = gap_for(args.source_fps, args.target_dt)
+    else:
+        gap = max(1, args.frame_gap)
+
+    timing = _seconds_or_frames(args)
+    smooth_window = timing["smooth"]
+    focus_timeout = timing["focus_timeout"]
+    cooldown_frames = timing["cooldown"]
+    track_window = timing["track_window"]
+    min_hits = timing["min_hits"]
+    stop_hits = timing["stop_hits"]
+
     device = args.device if torch.cuda.is_available() else "cpu"
     model = load_model(args.checkpoint, device)
-    weights = component_weights(args)
+    weights = component_weights(
+        args.score_mode, args.velocity_weight, args.pose_weight, args.deep_weight
+    )
 
     output = args.output or (
         ROOT / "results/videos" / f"shanghaitech_scene{args.scene}_{args.clip}_people.mp4"
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     csv_path = output.with_suffix(".scores.csv")
-    gap = max(1, args.frame_gap)
 
     writer = None
     if not args.score_only:
@@ -458,25 +229,39 @@ def main() -> None:
     print(f"checkpoint : {args.checkpoint}")
     print(f"clip       : {args.clip}  ({len(frame_paths)} frames)")
     print(f"device     : {device}")
-    print(f"frame gap  : {gap} frames ({gap / args.fps:.2f}s at {args.fps:g} fps)")
+    print(
+        f"frame gap  : {gap} frames "
+        f"({effective_dt(args.source_fps, gap):.3f}s at {args.source_fps:g} fps)"
+    )
+    print(
+        f"timing     : smooth={smooth_window} focus_timeout={focus_timeout} "
+        f"cooldown={cooldown_frames} track_window={track_window} "
+        f"min_hits={min_hits} stop_hits={stop_hits}"
+    )
     if not args.score_only:
         print(f"output     : {output}")
         print(f"thresholds : image={args.image_threshold} box={args.box_threshold}")
     print(f"csv        : {csv_path}")
 
     total = len(frame_paths) - gap
-    start = max(1, args.start_frame)
+    start = max(gap, args.start_frame)
     end = args.end_frame if args.end_frame > 0 else total
     end = min(end, total)
-    proc_start = max(1, start - args.smooth_window)
+    if end < start:
+        raise SystemExit(
+            f"Not enough frames for gap {gap}: start={start}, end={end}, "
+            f"frames={len(frame_paths)}"
+        )
+    # Never let the first frame index go negative when gap > 1 (the legacy
+    # renderer used gap 1, where max(1, ...) was sufficient).
+    proc_start = max(gap, start - smooth_window)
 
     rows = []
     history: list[float] = []
-    tracks: dict[int, Track] = {}
+    tracks: dict = {}
     next_track_id = 1
     focus_center: tuple[float, float] | None = None
     last_focus_frame = -10_000
-    prev = cv2.imread(str(frame_paths[proc_start - gap]))
     started = time.time()
 
     for idx in range(proc_start, end + 1):
@@ -487,9 +272,9 @@ def main() -> None:
         )
 
         if not history:
-            history = [raw_score] * max(1, args.smooth_window)
+            history = [raw_score] * max(1, smooth_window)
         history.append(raw_score)
-        history = history[-max(1, args.smooth_window) :]
+        history = history[-max(1, smooth_window) :]
         score = sum(history) / len(history)
 
         candidates = score_persons(
@@ -499,7 +284,7 @@ def main() -> None:
             component_scores,
             args.min_area,
         )
-        if idx - last_focus_frame > args.focus_timeout:
+        if idx - last_focus_frame > focus_timeout:
             focus_center = None
         detections, focus_center = select_persons(
             candidates,
@@ -522,10 +307,10 @@ def main() -> None:
             detections,
             next_track_id,
             args.track_iou,
-            max(1, args.track_window),
-            max(1, args.track_min_hits),
-            max(1, args.track_stop_hits),
-            max(0, args.cooldown_frames),
+            max(1, track_window),
+            max(1, min_hits),
+            max(1, stop_hits),
+            max(0, cooldown_frames),
             args.box_threshold,
             args.track_stop_threshold
             if args.track_stop_threshold is not None
@@ -608,7 +393,6 @@ def main() -> None:
                 f"boxes={len(boxes)}  map_max={anomaly_map.max():.3f}  {rate:.2f} fps",
                 flush=True,
             )
-        prev = current
 
     if writer is not None:
         writer.release()

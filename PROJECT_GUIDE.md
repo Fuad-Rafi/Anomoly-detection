@@ -7,6 +7,15 @@ result on ShanghaiTech scene 1 obtained; corrected people-only AI-VAD demo deliv
 (98/98 boxed frames on ground truth, per-person precision 0.888). Training runs continue
 from here.
 
+**Current focus:** frame-rate-robust detection. Standard CCTV runs 25/30 fps, high-end
+50/60 fps. The model is time-based (`Δt ≈ 0.2 s`), so `gap = round(fps × Δt)` runs on any
+source today. Phase 1 (2026-11-03) verified invariance at fixed Δt across 10–30 fps:
+20/30 fps emulations match the 10 fps run (Spearman 0.999, alarm Jaccard 0.987–0.994,
+zero delay); 5 fps retains score/alarm agreement but loses box localization. 50/60 fps is
+out of scope (no genuine high-fps labelled data). The open question is whether smaller Δt
+(0.04/0.08 s) improves fast-event detection — Phase 2. See `docs/FPS_ROBUSTNESS.md` and
+`RESEARCH_ROADMAP.md` §2b.
+
 ---
 
 ## 1. Plain-English summary

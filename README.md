@@ -8,11 +8,20 @@ web demo.
 > something strange happens (someone runs, fights, or a bike appears where it should not),
 > it should shout "weird!" and mark where.
 
-**Status:** 2026-11-03 — corrected people-only AI-VAD demo delivered.
-All three datasets are downloaded and prepared. PatchCore on ShanghaiTech scene 1 gives
-**image AUROC 0.785 / pixel AUROC 0.989** (subsampled evaluation, see below). The fight
-demo now has **98/98 boxed frames on ground truth** and **0.888 per-person precision**
-(pixel-mask evaluation).
+**Status:** 2026-11-04 — corrected people-only AI-VAD demo delivered, the
+frame-rate-invariance harness is complete, and a real 25 fps Avenue demo is rendered.
+All three datasets are downloaded and prepared.
+PatchCore on ShanghaiTech scene 1 gives **image AUROC 0.785 / pixel AUROC 0.989**
+(subsampled evaluation, see below). The fight demo has **98/98 boxed frames on ground
+truth** and **0.888 per-person precision** (pixel-mask evaluation).
+
+**Current focus:** frame-rate-robust detection. Phase 1 shows that at a fixed
+`Δt = 0.208 s` the detector is invariant across 10–30 fps: 20/30 fps emulations match the
+10 fps run (Spearman **0.999**, alarm Jaccard **0.987–0.994**, zero delay). 5 fps keeps
+score/alarm agreement but loses box localization; a real 25→10 fps Avenue comparison keeps
+ρ = 0.987. 50/60 fps is out of scope (no genuine high-fps labelled footage). The open
+question is whether smaller Δt (0.04/0.08 s) improves fast-event detection — Phase 2.
+See `docs/FPS_ROBUSTNESS.md` and `RESEARCH_ROADMAP.md` §2b.
 
 ---
 
@@ -57,6 +66,23 @@ ShanghaiTech scene 1, PatchCore, WideResNet-50 (layers 2+3), coreset 1%, 256 px:
 These are **subsampled** numbers, not the final benchmark: the machine has only 7.9 GB RAM,
 and a full 11,894-frame test ran inference but ran out of memory while computing pixel AUROC.
 A streaming/per-video evaluation is the next engineering step.
+
+### Frame-rate robustness (Phase 1)
+
+Fixed `Δt = 0.208 s`, scene-1 AI-VAD checkpoint. Reference run is 10 fps; metrics are on
+common source frames.
+
+| Data | Comparison | Spearman | Alarm Jaccard | Box Jaccard | Delay |
+|---|---|---|---:|---:|---:|
+| `01_0026` | 10 → 5 fps | 0.983 | 0.938 | 0.231 | −0.4 s |
+| `01_0026` | 10 → 20 fps | 0.999 | 0.994 | 1.000 | 0.0 s |
+| `01_0026` | 10 → 30 fps | 0.999 | 0.987 | 1.000 | 0.0 s |
+| `03_0061` | 10 → 5 fps | 0.996 | 0.991 | 0.839 | 0.0 s |
+| Avenue `01` | 25 → 10 fps (real 25 fps) | 0.987 | 1.000* | 0.765 | 0.0 s |
+| `01_0026` | Δt 0.208 → 0.05 s | 0.970 | 0.845 | 0.000 | +0.8 s |
+
+\* Saturated: all common Avenue frames alarm at the ShanghaiTech threshold. Full method,
+limits, and artifacts: `docs/FPS_ROBUSTNESS.md`.
 
 ## Demo video
 
@@ -121,6 +147,47 @@ The fix for the earlier walker boxes was threefold:
 The frame-wise PatchCore model **cannot** do this: on the same fight clip it scored 44-56
 with no boxes. AI-VAD uses person detection, optical flow, pose, and CLIP features, which is
 why it catches the motion anomaly.
+
+### Real 25 fps Avenue demo
+
+```
+results/videos/avenue_05_25fps_annotated.mp4
+```
+
+- **Genuine 25 fps** source (`data/avenue/testing_videos/05.avi`), 640×360, 40.08 s.
+- AI-VAD fitted on the 16 Avenue normal training videos at gap 5 / 25 fps (**0.2 s**),
+  with percentile normalization; not the ShanghaiTech checkpoint.
+- Calibrated on Avenue normal footage at the 80th percentile: image 1.9651, box 1.20128,
+  motion gate disabled.
+- 1,002 pairs processed, **138 boxed frames**, 128 on ground truth:
+  box precision **0.928**, recall 0.402.
+- Frame alarms: precision **0.826**, recall 0.506, F1 0.628.
+- Boxes cluster on the labelled event (599–658, 713–783) plus one post-event false-positive
+  cluster (808–819).
+
+A second clip, `17.avi`, is also rendered at 25 fps:
+
+```
+results/videos/avenue_17_25fps_annotated.mp4
+```
+
+- 426 frames, 16.84 s, 333 boxed frames (329 on GT): box precision **0.988**,
+  recall 0.868; alarm F1 **0.934**.
+- It required a per-clip threshold (image 1.70, box 1.00), because clip 05's q80
+  threshold produced zero boxes here. A single Avenue threshold does not transfer
+  across clips; this is a demo, not a benchmark.
+
+A blind unseen test on `01.avi` with the fixed q80 threshold exposed the failure mode:
+1,023 boxed frames out of 1,434, only 293 on GT (box precision **0.286**). The model
+over-fires on normal people.
+
+- Blind result: `results/videos/avenue_01_25fps_annotated_blind.mp4`
+- Label-informed rerender (image 2.20 / box 1.20): `results/videos/avenue_01_25fps_annotated.mp4`
+  — 366 boxed frames, 200 on GT, box precision 0.546, recall 0.490; frame F1 0.635.
+
+Even the tuned version misses about half the anomalous frames; the model is not
+calibrated for a new clip. Details: `docs/FPS_ROBUSTNESS.md` §7 and
+`docs/CHALLENGES.md` C-38.
 
 ### Product-hardening direction
 
@@ -197,6 +264,8 @@ byte-exact (6,992,962,418 bytes).
 - **Temporal gaps:** AI-VAD's velocity features depend on the time between the two input
   frames. Training videos are 24 fps and ShanghaiTech test frames are 10 fps, so frame
   counts are not comparable. Match gaps in seconds (`src/fit_aivad_gap.py`).
+  Phase 1 confirms fixed-Δt invariance across 10–30 fps, but a checkpoint is only valid
+  at the Δt it was fitted on; a sub-frame Δt silently becomes `1/fps`.
 - **Demo scope:** the fight video is tuned on `01_0026` and cropped to the labelled event.
   A scene-1 model still produces walking false positives on `03_0061`; per-scene fitting
   or a supervised verifier is the next step.
