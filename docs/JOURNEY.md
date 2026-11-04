@@ -816,7 +816,7 @@ reliability is a supervised verifier or a per-scene normal model, not another th
 
 ---
 
-### 9.9 Current focus: higher-frame-rate detection
+### 9.9 The frame-rate question
 
 The next question follows directly from the gap/fps discovery. Standard CCTV runs at
 **25/30 fps** (PAL/NTSC), with high-end cameras at **50/60 fps**. The model is time-based:
@@ -830,9 +830,66 @@ This splits into two questions:
 2. **Value of resolution (research):** does a smaller Δt at high fps improve fast-motion
    detection (fights), or only add compute?
 
-The plan is an fps-aware sampler, a multi-fps labelled evaluation set (same scene at
+The plan was an fps-aware sampler, a multi-fps labelled evaluation set (same scene at
 10/25/30/60 fps), a fixed-Δt invariance ablation, and a refit at smaller Δt (0.05/0.1/0.2 s)
-to test the value of temporal resolution. See `RESEARCH_ROADMAP.md` §2b.
+to test the value of temporal resolution. The first two were completed in Phase 1; see
+§9.10 below and `RESEARCH_ROADMAP.md` §2b.
+
+---
+
+### 9.10 Phase 1: frame-rate invariance (2026-11-04)
+
+The fps issue was fixed at the pipeline level rather than with a new model:
+
+- `src/temporal.py` plans samples by time (`gap = round(source_fps × Δt)`), reports the
+  effective Δt, and maps timestamps back to source frames.
+- `src/aivad_core.py` holds the shared batched inference, scoring, selection, and tracking.
+- `src/eval_aivad.py` writes one timestamped row per sample and caches inference per
+  unique frame pair, so 20/30 fps emulation does not cost 2–3× the GPU time.
+- Smoothing, focus timeout, cooldown, and tracking windows are durations in seconds.
+- `tests/` contains 30 tests; `src/compare_golden.py` guards the refactor against the
+  legacy renderer.
+
+Results at fixed Δt = 0.2083 s:
+
+| Data | Comparison | Spearman | Alarm Jaccard | Box Jaccard | Delay |
+|---|---|---|---:|---:|---:|
+| `01_0026` | 10 → 5 fps | 0.983 | 0.938 | 0.231 | −0.4 s |
+| `01_0026` | 10 → 20 fps | 0.999 | 0.994 | 1.000 | 0.0 s |
+| `01_0026` | 10 → 30 fps | 0.999 | 0.987 | 1.000 | 0.0 s |
+| `03_0061` | 10 → 5 fps | 0.996 | 0.991 | 0.839 | 0.0 s |
+| Avenue `01` | 25 → 10 fps | 0.987 | 1.000* | 0.765 | 0.0 s |
+| `01_0026` | Δt 0.208 → 0.05 s | 0.970 | 0.845 | 0.000 | +0.8 s |
+
+\* Saturated: all common Avenue frames alarm at the ShanghaiTech threshold.
+
+The invariance claim holds at full rate. The 20/30 fps rows are emulated from 10 fps
+frames, so they validate the sampler and temporal clock, not the value of genuine
+high-fps information. `target_dt = 0.05 s` at 10 fps silently becomes 0.1 s, which is a
+Δt mismatch, not a high-fps win.
+
+### 9.11 Real 25 fps Avenue demos and the calibration failure
+
+To test a genuinely higher-fps source, AI-VAD was fitted on the 16 Avenue normal
+training videos at gap 5 / 25 fps = 0.2 s (604 clips, 5,053 detections), with percentile
+normalisation. The first demos used a threshold calibrated on normal Avenue footage:
+
+- Clip `05`: 138 boxed frames, 128 on GT, box precision **0.928**, recall 0.402.
+- Clip `17`: 333 boxed frames, 329 on GT, box precision **0.988**, recall 0.868, but
+  only after a per-clip threshold (image 1.70, box 1.00).
+
+The blind unseen test on `01.avi` exposed the remaining weakness. With the fixed q80
+threshold (image 1.9651, box 1.20128), it produced 1,023 boxed frames out of 1,434,
+only 293 on GT: box precision **0.286**, recall 0.718. The model over-fired on normal
+people. A label-informed rerender at image 2.20 / box 1.20 reduced this to 366 boxed
+frames / 200 on GT (precision 0.546, recall 0.490), but it still misses about half the
+anomalous frames.
+
+The lesson is now documented as C-37/C-38: the frame-rate fix works, but a single
+threshold does not transfer across unseen clips or cameras. Per-camera calibration or a
+supervised verifier is the next step. The 25 fps videos remain local
+(`results/videos/avenue_*_25fps_annotated.mp4`) because `.gitignore` excludes generated
+MP4s; the score CSVs and metadata are tracked.
 
 ---
 
@@ -999,36 +1056,42 @@ Important because AI-VAD is the first true video-native model in the lineup.
 - Data pipelines for Avenue and ShanghaiTech.
 - One real PatchCore result.
 - Documentation set.
+- Time-based frame-rate harness with 30 tests and a golden regression guard.
+- Phase 1 invariance results (10–30 fps at fixed Δt).
+- Real 25 fps Avenue demos and an honest blind unseen-test analysis.
 
 ### Not ready
 
-- `src/render_video.py` and `src/render_people_video.py` are implemented; the general
-  runner, `configs/`, and `app/` remain pending.
+- `src/render_video.py`, `src/render_people_video.py`, and the frame-rate harness are
+  implemented; the general config-driven runner, `configs/`, and `app/` remain pending.
 - No PaDiM/FUVAS/WinCLIP benchmark runs yet; AI-VAD has a scene-1 fit and people-only demo.
 - Temporal product layer is implemented in the AI-VAD renderer; benchmark event metrics remain.
 - No Gradio demo.
 - No memory-safe full-test evaluation.
 - No hyperparameter ablations.
 - No report.
+- No cross-camera calibration; blind Avenue `01` over-fires (C-37/C-38).
 
 ---
 
 ## 14. Next steps (ordered)
 
-1. Write `src/run.py` — config-driven runner.
-2. Implement per-scene memory-bank sampling (target ~700 frames, adjustable).
-3. Implement memory-safe evaluation:
+1. Phase 2: matched Δt refits on Avenue (gaps 1/2/5) and per-camera calibration.
+2. Evaluate cross-camera threshold transfer; consider a meta-calibration or prototype
+   head trained across scenes (few-shot), not zero-shot.
+3. Write `src/run.py` — config-driven runner.
+4. Implement per-scene memory-bank sampling (target ~700 frames, adjustable).
+5. Implement memory-safe evaluation:
    - image AUROC on all test frames (cheap),
    - pixel AUROC on a fixed subsample or streaming per video.
-4. Save and reuse checkpoints.
-5. Run PaDiM scene 1 with the same protocol.
-6. Run PaDiM + PatchCore on scenes 1–3.
-7. Run AI-VAD on scenes 1–3 (scene 1 fit/demo is complete; scenes 2–3 remain).
-8. Add temporal smoothing and event metrics.
-9. Run FUVAS few-shot, then WinCLIP zero-shot.
-10. Extend to all 13 scenes + Avenue.
-11. Gradio demo + ONNX export + FPS table.
-12. Final report and results table.
+6. Save and reuse checkpoints.
+7. Run PaDiM scene 1 with the same protocol; then scenes 1–3.
+8. Run AI-VAD on scenes 2–3 (scene 1 fit/demos are complete).
+9. Add event-level metrics.
+10. Run FUVAS few-shot (k curve), then WinCLIP zero-shot.
+11. Extend to all 13 scenes + Avenue.
+12. Gradio demo + ONNX export + FPS table.
+13. Final report and results table.
 
 ---
 
@@ -1149,6 +1212,7 @@ engine.test(model=model, datamodule=dm_test)
 | `docs/DECISIONS.md` | Decision records |
 | `docs/CHALLENGES.md` | Problem catalog |
 | `docs/EXPERIMENTS.md` | Experiment and tuning log |
+| `docs/FPS_ROBUSTNESS.md` | Frame-rate invariance and Avenue demo report |
 | `docs/Project_Journey.pdf` | PDF build of the journey docs |
 
 ### Code and config
@@ -1156,11 +1220,13 @@ engine.test(model=model, datamodule=dm_test)
 | Path | State |
 |---|---|
 | `configs/` | Empty (planned) |
-| `src/` | PatchCore and AI-VAD renderers; benchmark runner planned |
+| `src/` | PatchCore/AI-VAD renderers, time-based sampler, shared AI-VAD core, timestamped evaluator, fit/recalibration/label tools |
 | `app/` | Empty (planned) |
-| `tests/` | Empty (planned) |
+| `tests/` | 30 tests: temporal math, alignment, candidate shape |
 | `requirements.txt` | Written with verified versions |
 | `results/summary.csv` | First result row |
+| `results/fps/` | Phase 1 invariance CSVs, Avenue demos, calibration, metadata |
+| `docs/FPS_ROBUSTNESS.md` | Frame-rate method, results, limits, Avenue demos |
 
 ### Data
 

@@ -15,13 +15,16 @@ PatchCore on ShanghaiTech scene 1 gives **image AUROC 0.785 / pixel AUROC 0.989*
 (subsampled evaluation, see below). The fight demo has **98/98 boxed frames on ground
 truth** and **0.888 per-person precision** (pixel-mask evaluation).
 
-**Current focus:** frame-rate-robust detection. Phase 1 shows that at a fixed
+**Current focus:** generalisation and calibration. Phase 1 shows that at a fixed
 `Δt = 0.208 s` the detector is invariant across 10–30 fps: 20/30 fps emulations match the
 10 fps run (Spearman **0.999**, alarm Jaccard **0.987–0.994**, zero delay). 5 fps keeps
 score/alarm agreement but loses box localization; a real 25→10 fps Avenue comparison keeps
-ρ = 0.987. 50/60 fps is out of scope (no genuine high-fps labelled footage). The open
-question is whether smaller Δt (0.04/0.08 s) improves fast-event detection — Phase 2.
-See `docs/FPS_ROBUSTNESS.md` and `RESEARCH_ROADMAP.md` §2b.
+ρ = 0.987. The remaining bottleneck is **threshold transfer**: a blind Avenue `01` run at
+the fixed q80 threshold gave box precision **0.286**, and per-clip tuning reached only
+0.546 precision / 0.490 recall. 50/60 fps is out of scope (no genuine high-fps labelled
+footage). Next: matched Δt sweeps, per-camera calibration, and a few-shot
+Prototypical/MAML calibration study (meta-learning is not a zero-shot fix). See
+`docs/FPS_ROBUSTNESS.md`, `RESEARCH_ROADMAP.md` §2b, and `docs/CHALLENGES.md` C-37/C-38.
 
 ---
 
@@ -49,6 +52,7 @@ See `docs/FPS_ROBUSTNESS.md` and `RESEARCH_ROADMAP.md` §2b.
 | `docs/DECISIONS.md` | Decision records (ADR style) with alternatives and consequences |
 | `docs/CHALLENGES.md` | Problem catalog: symptom, root cause, fix, status, lesson |
 | `docs/EXPERIMENTS.md` | Experiment log, hyperparameters, memory analysis, tuning plan |
+| `docs/FPS_ROBUSTNESS.md` | Frame-rate invariance, Avenue 25 fps demos, blind unseen-clip analysis |
 | `docs/PROGRESS.md` | Living progress log and next actions |
 | `docs/Project_Journey.pdf` | PDF build of the journey, decisions, challenges, and experiments |
 

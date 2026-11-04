@@ -306,17 +306,22 @@ motion gate per Δt, and compare event recall/delay.
 - Environment: ready.
 - Data: ready (all three datasets).
 - Code: PatchCore and AI-VAD renderers, gap-matched fitting, robust normalisation,
-  pixel-mask per-person evaluation, focus lock, threshold tooling, and a timestamped
-  fps-aware AI-VAD evaluator are implemented. The general runner, Gradio app, and
-  full benchmark harness remain pending.
+  pixel-mask per-person evaluation, focus lock, threshold tooling, a timestamped
+  fps-aware AI-VAD evaluator, and 30 tests are implemented. The general runner, Gradio
+  app, and full benchmark harness remain pending.
 - Results: one PatchCore scene-1 benchmark result, a corrected AI-VAD scene-1 demo
   (98/98 boxed frames on GT, 0.888 per-person precision), Phase 1 frame-rate invariance
-  (20/30 fps match 10 fps at fixed Δt; 5 fps loses box localization), and a real 25 fps
-  Avenue demo (Avenue-fitted model, 138 boxed frames, box precision 0.928, recall 0.402).
-- Next: Phase 2 Avenue Δt sweep, then PaDiM scene 1 and the 3-scene comparison.
-- **Current focus:** frame-rate-robust detection. The fixed-Δt invariance half is done;
-  the open question is whether smaller Δt (0.04/0.08 s) improves fast-event detection.
-  See `RESEARCH_ROADMAP.md` §2b and `docs/FPS_ROBUSTNESS.md`.
+  (20/30 fps match 10 fps at fixed Δt; 5 fps loses box localization), and real 25 fps
+  Avenue demos. Clip 05: box precision 0.928 / recall 0.402. Clip 17: 0.988 / 0.868
+  with a per-clip threshold. Blind clip 01: precision 0.286 / recall 0.718; tuned
+  2.20/1.20: 0.546 / 0.490.
+- Next: Phase 2 Avenue Δt sweep and cross-camera calibration, then PaDiM scene 1 and
+  the 3-scene comparison.
+- **Current focus:** generalisation and calibration. Fixed-Δt frame-rate invariance is
+  solved; the open questions are smaller Δt (0.04/0.08 s) for fast events, and how to
+  make thresholds transfer across unseen clips/cameras. Meta-learning is a candidate for
+  few-shot calibration, not zero-shot. See `RESEARCH_ROADMAP.md` §2b,
+  `docs/FPS_ROBUSTNESS.md`, and `docs/CHALLENGES.md` C-37/C-38.
 
 ### Product-hardening status
 
@@ -341,6 +346,9 @@ motion gate per Δt, and compare event recall/delay.
 
 0. [ ] Phase 2: Avenue matched fits at Δt 0.04/0.08/0.2 s (gaps 1/2/5 at 25 fps),
    recalibrate the motion gate per Δt, and evaluate event recall/delay.
+0b. [ ] Per-camera calibration study: support-only threshold/score normalisation,
+    then a meta-calibration or Prototypical/MAML head across scenes (few-shot, not
+    zero-shot). Compare against FUVAS k = 1/2/4/8.
 1. [x] Create `requirements.txt` from the verified environment.
 2. [ ] Implement `src/run.py` (config-driven datamodule + model + engine).
 3. [x] Implement frame subsampling for the PatchCore memory bank (runner/config support
@@ -367,6 +375,12 @@ motion gate per Δt, and compare event recall/delay.
 - Optimal memory-bank size per scene (400 / 700 / 1,000 frames) for the AUROC/memory tradeoff.
 - Whether AI-VAD/FUVAS need separate clip lengths and datamodule settings beyond defaults.
 - Whether the UCSD `UCSDped` datamodule accepts our extracted folder layout directly.
+- How to normalise anomaly scores and thresholds across unseen cameras/clips without
+  label leakage (C-37/C-38).
+- Whether meta-learning (Prototypical/MAML) for few-shot normal adaptation beats simple
+  per-camera percentile calibration, and whether it is worth the task-design complexity.
+- Whether smaller Δt at genuinely high frame rates improves fast-event detection; this
+  needs real high-fps labelled data, not upsampled 10 fps frames.
 
 ## Risks being watched
 

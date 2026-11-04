@@ -498,10 +498,14 @@ appeared.
 - **Root cause:** The score distribution shifts across clips. Clip 01's GT/normal
   candidate distributions overlap heavily (GT1 score median 1.175 vs GT0 1.129), so a
   threshold calibrated on one normal video is too permissive here.
-- **Workaround:** A label-informed sweep at image 2.20 / box 1.20 gives 371 boxed
-  frames, 202 on GT (precision 0.54, recall 0.50) — better, but still weak.
+- **Workaround:** A label-informed rerun at image 2.20 / box 1.20 gives 366 boxed
+  frames, 200 on GT (precision 0.546, recall 0.490; frame F1 0.635) — cleaner, but still
+  misses about half the anomalous frames.
+- **Artifacts:** blind `results/videos/avenue_01_25fps_annotated_blind.mp4` +
+  `results/fps/avenue_demo/01/scores_blind.csv`; tuned
+  `results/videos/avenue_01_25fps_annotated.mp4` + `scores.csv`.
 - **Status:** Open. Per-clip/camera calibration and a supervised verifier are required;
-  do not present the blind video as a success.
+  do not present the tuned video as a blind success.
 - **Lesson:** Always report a blind unseen run before tuning; threshold transfer across
   clips is not guaranteed.
 
@@ -510,6 +514,8 @@ appeared.
 | Memory-safe full-test evaluation | High | Stream metrics per video or use two-tier evaluation |
 | Memory-bank size ablation | High | 400 / 700 / 1,000 / 2,000 frames |
 | Validation threshold protocol | High | Build a validation split with anomalies or define a rule |
+| Cross-clip/camera threshold transfer | High | Per-camera calibration, score normalisation, or meta-calibration |
+| Few-shot adaptation | Medium | Compare FUVAS, Prototypical/MAML head, and percentile calibration at k = 1/2/4/8 |
 | Data loading speed | Medium | Try `num_workers=2–3` |
 | Reproducible seeds | Medium | Seed Python/NumPy/PyTorch, log configs |
 | Visual heatmaps | Medium | Generate overlays ourselves (visualizer disabled) |

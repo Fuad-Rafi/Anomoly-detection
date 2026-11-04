@@ -564,7 +564,7 @@ GT start 278 (18-frame / 1.8 s delay), and the last is 397 (exact GT end).
 
 ---
 
-## 3.8 Planned experiment E-005 - higher-frame-rate detection
+## 3.8 E-005 - higher-frame-rate detection (planning note)
 
 ### Status
 
@@ -602,7 +602,7 @@ Velocity/pose/deep component AUC and per-person pixel-mask precision vs Δt and 
 
 ### Status
 
-Completed 2026-11-03.
+Completed 2026-11-04.
 
 ### Setup
 
@@ -761,7 +761,7 @@ of scope.
 | image_size | 256 | 224, 320 |
 | memory-bank frames | ~700 | 400–2,000 |
 
-### AI-VAD (planned)
+### AI-VAD (implemented for scene 1 and Avenue)
 
 Constructor parameters verified in Anomalib 2.7:
 
@@ -784,6 +784,27 @@ Constructor parameters verified in Anomalib 2.7:
 
 Initial plan: defaults, clip length ≥2, then tune `box_score_thresh`, `persons_only`,
 `min_bbox_area`, and the feature toggles.
+
+Project-side temporal and calibration parameters (implemented):
+
+| Parameter | Current | Meaning |
+|---|---|---|
+| `target_dt` | 0.2083 s | physical window between the two frames |
+| `source_fps` | 10 / 24 / 25 | native source rate |
+| `gap` | `round(fps × Δt)` | derived frame gap; clamped ≥1 |
+| `process_hz` | source/emulated fps | decision cadence |
+| `smooth_seconds` | 1.5 s | score moving average |
+| `focus_timeout_seconds` | 3.0 s | drop stale focus lock |
+| `cooldown_seconds` | 3.0 s | per-track cooldown |
+| `track_window_seconds` | 1.0 s | IoU track score window |
+| `track_min_hits_seconds` | 0.6 s | track activation |
+| `track_stop_hits_seconds` | 1.0 s | track deletion |
+| `image_threshold` | 1.9651 or per-clip | frame alarm |
+| `box_threshold` | 1.20128 or per-clip | person box |
+| `motion_threshold` | 0 (Phase 1) / per-Δt later | velocity gate |
+
+The checkpoint is Δt-specific. Changing `target_dt` requires a matched refit; changing
+`source_fps` at fixed Δt does not.
 
 ### FUVAS (planned)
 
@@ -961,22 +982,25 @@ The interval-aware command is:
 | E-002 | PatchCore | ShanghaiTech | 1 | annotated truck demo video | Done |
 | E-003 | AI-VAD | ShanghaiTech | 1 | people-only demo (pre-hardening) | Done (superseded by E-004) |
 | E-004 | AI-VAD | ShanghaiTech | 1 | gap-matched fit, per-person eval, focus-lock demo | Done |
-| E-005 | PaDiM | ShanghaiTech | 1 | classical baseline | Planned |
-| E-006 | PatchCore | ShanghaiTech | 2, 3 | scene generalization | Planned |
-| E-007 | PaDiM | ShanghaiTech | 2, 3 | scene generalization | Planned |
-| E-008 | PatchCore | ShanghaiTech | 1 | memory-bank size ablation | Planned |
-| E-009 | PatchCore | ShanghaiTech | 1 | coreset ablation | Planned |
-| E-010 | PatchCore | ShanghaiTech | 1 | backbone/layer ablation | Planned |
-| E-011 | AI-VAD | ShanghaiTech | 1-3 | video-native benchmark | Planned |
-| E-012 | FUVAS | ShanghaiTech | 1-3 | few-shot curve | Planned |
-| E-013 | WinCLIP | ShanghaiTech | 1-3 | zero-shot | Planned |
-| E-014 | all | ShanghaiTech | 1-13 | full benchmark | Planned |
-| E-015 | best | Avenue | all | cross-dataset | Planned |
-| E-016 | all | ShanghaiTech | 1-3 | temporal ablation | Planned |
-| E-017 | best | video demo | n/a | Gradio + ONNX FPS | Planned |
+| E-006 | AI-VAD | ShanghaiTech/Avenue | 1 | fixed-Δt frame-rate invariance (10–30 fps) | Done (`FPS_ROBUSTNESS.md`) |
+| E-007 | AI-VAD | Avenue | 5/17/01 | real 25 fps demos + blind unseen test | Done |
+| E-101 | PaDiM | ShanghaiTech | 1 | classical baseline | Planned |
+| E-102 | PatchCore | ShanghaiTech | 2, 3 | scene generalization | Planned |
+| E-103 | PaDiM | ShanghaiTech | 2, 3 | scene generalization | Planned |
+| E-104 | PatchCore | ShanghaiTech | 1 | memory-bank size ablation | Planned |
+| E-105 | PatchCore | ShanghaiTech | 1 | coreset ablation | Planned |
+| E-106 | PatchCore | ShanghaiTech | 1 | backbone/layer ablation | Planned |
+| E-107 | AI-VAD | ShanghaiTech | 1-3 | video-native benchmark | Planned |
+| E-108 | FUVAS | ShanghaiTech | 1-3 | few-shot curve | Planned |
+| E-109 | WinCLIP | ShanghaiTech | 1-3 | zero-shot | Planned |
+| E-110 | all | ShanghaiTech | 1-13 | full benchmark | Planned |
+| E-111 | best | Avenue | all | cross-dataset | Planned |
+| E-112 | all | ShanghaiTech | 1-3 | temporal ablation | Planned |
+| E-113 | best | video demo | n/a | Gradio + ONNX FPS | Planned |
 
-Demo experiments E-002 to E-004 were inserted after E-001; the remaining IDs are shifted
-by three from the original plan.
+Completed experiments E-006/E-007 are the frame-rate and Avenue studies. Planned IDs use
+the 100 block to avoid collisions with those completed records. Demo experiments E-002 to
+E-004 were inserted after E-001.
 
 ---
 

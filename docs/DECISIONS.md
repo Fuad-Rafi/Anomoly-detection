@@ -337,7 +337,7 @@ made, and its consequences. Status values: **Accepted**, **Superseded**, **Provi
 ## D-26 - Drive sampling by elapsed time, not frame index, for higher frame rates
 
 - **Date:** 2026-11-03
-- **Status:** Accepted (current focus)
+- **Status:** Accepted — implemented and verified in Phase 1 (2026-11-04)
 - **Context:** Standard CCTV runs 25/30 fps (PAL/NTSC), high-end cameras 50/60 fps. The
   model scores two frames separated by Δt, so a fixed frame gap means different real-time
   windows on different cameras.
@@ -375,6 +375,23 @@ made, and its consequences. Status values: **Accepted**, **Superseded**, **Provi
   the Δt it was fitted on, and a sub-frame Δt quantises to `1/fps`.
 - **Consequences:** Phase 2 must refit at 0.04/0.08/0.2 s on Avenue and recalibrate the
   motion gate per Δt. A genuine high-fps claim requires new data, not upsampling.
+
+## D-28 - Report blind results before tuning, and treat meta-learning as few-shot
+
+- **Date:** 2026-11-04
+- **Status:** Accepted
+- **Context:** A blind q80 threshold on unseen Avenue `01.avi` produced 1,023 boxed
+  frames, only 293 on GT (box precision 0.286). A label-informed rerun at image 2.20 /
+  box 1.20 improved precision to 0.546 but recall only 0.490. Clips 05 and 17 needed
+  different thresholds again. The frame-rate invariance question is closed; the open
+  question is calibration across cameras.
+- **Decision:** Keep blind and tuned artifacts separate and always report the blind
+  result first. Do not present a per-clip threshold as a general detector. For future
+  adaptation, treat meta-learning as a **few-shot/calibration** tool (Prototypical/MAML
+  over source tasks), not as a zero-shot solution; zero-shot remains WinCLIP/CLIP.
+- **Consequences:** Per-camera calibration, score normalisation, or a supervised verifier
+  is required before deployment claims. Meta-learning experiments must be evaluated at
+  k = 1/2/4/8 normal clips and compared with FUVAS and simple percentile calibration.
 
 | Original | Replaced by | Reason |
 |---|---|---|

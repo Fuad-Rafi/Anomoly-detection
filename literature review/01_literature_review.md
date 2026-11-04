@@ -104,22 +104,49 @@ Relevant to this project's 7.9 GB RAM constraint.
 ShanghaiTech (2018), Avenue (2013), UCSD Ped1/Ped2 (2010), UCF-Crime (2018),
 XD-Violence (2020), UBnormal (2022, synthetic for OOD generalization).
 
-## 10. Gap analysis — where this project sits
+## 10. Few-shot, zero-shot, and meta-learning — project note
+
+Meta-learning is a **few-shot** tool, not a zero-shot one. It learns a prior over tasks,
+each with a small support set, then adapts at test time. Zero-shot has no support set, so
+it needs semantic side information; in VAD that is the CLIP/foundation-model lineage
+(§6), not classical meta-learning.
+
+Relevant building blocks:
+
+- **Metric-based:** Vinyals et al., *Matching Networks for One Shot Learning*, NeurIPS
+  2016; Snell et al., *Prototypical Networks for Few-shot Learning*, NeurIPS 2017;
+  Sung et al., *Learning to Compare: Relation Network for Few-Shot Learning*, CVPR 2018.
+- **Optimization-based:** Finn et al., *Model-Agnostic Meta-Learning (MAML)*, ICML 2017;
+  Nichol et al., *On First-Order Meta-Learning Algorithms (Reptile)*, 2018.
+- **Few-shot AD in this project:** FUVAS (§4) is the existing few-shot baseline; a
+  meta-learned normal prototype or calibration head should be compared at k = 1/2/4/8.
+- **Zero-shot AD in this project:** WinCLIP/AnomalyCLIP (§6), not meta-learning.
+
+The realistic use here is **meta-calibration**: treat each clip/camera as a task, use k
+normal clips as support, and learn a threshold or monotone score transform that transfers
+to query clips. This directly targets the cross-clip threshold failure in §11. Task design
+is the hard part: this is one-class few-shot (support is normal-only), not N-way K-shot
+classification.
+
+## 11. Gap analysis — where this project sits
 
 | Axis | This project | Frontier |
 |---|---|---|
 | Method | PatchCore (image) + AI-VAD (video) | CLIP/foundation, ARVAD, weakly-supervised |
 | Metrics | subsampled AUROC, per-person pixel-mask precision | full-set AUROC/AP/PRO, multi-seed |
-| Novelty | none yet | frame-rate robustness / localization are open |
+| Robustness | fixed-Δt invariance verified 10–30 fps | genuine high-fps data, cross-camera calibration |
+| Novelty | frame-rate parameterisation + calibration study | frame-rate robustness / localization are open |
 
-Two of this project's empirical findings are genuine, under-explored entry points:
+Three empirical findings are genuine, under-explored entry points:
 
 1. **Train/inference frame-rate & gap mismatch** silently breaks flow-based video AD
    (24 fps training vs 10 fps test ⇒ 12× out of distribution for AI-VAD's velocity
-   term). → RQ-1 in the roadmap. The natural extension is **frame-rate invariance**:
-   standard CCTV runs 25/30 fps (high-end 50/60), so a detector should behave identically
-   at fixed Δt across fps, and the value of smaller Δt at high fps is an open question.
+   term). → RQ-1 in the roadmap. Phase 1 verified **fixed-Δt invariance** across
+   10–30 fps; the remaining question is the value of smaller Δt at genuinely high fps.
 2. **Frame-level AUROC hides per-person localization error** (a frame can be scored
    "anomalous" while the box sits on the wrong person). → RQ-2.
+3. **Thresholds do not transfer across unseen clips/cameras.** A blind q80 threshold on
+   Avenue `01` gave box precision 0.286; per-clip tuning reached 0.546 precision / 0.490
+   recall. This is now C-37/C-38 and the strongest near-term research target.
 
-Both are defensible, method-driven research questions. See `../RESEARCH_ROADMAP.md`.
+All three are defensible, method-driven research questions. See `../RESEARCH_ROADMAP.md`.

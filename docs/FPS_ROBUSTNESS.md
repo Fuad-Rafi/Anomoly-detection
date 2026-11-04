@@ -1,6 +1,7 @@
 # Frame-Rate Robustness (Phase 0–1)
 
-Status: Phase 0 harness and Phase 1 invariance complete (2026-11-03).
+Status: Phase 0 harness and Phase 1 invariance complete (2026-11-03); real 25 fps Avenue
+demos and the blind unseen-clip analysis added (2026-11-04).
 
 Scope: **10–30 fps only.** 50/60 fps is out of scope because the project has no
 genuine high-frame-rate labelled footage. ShanghaiTech testing is distributed as

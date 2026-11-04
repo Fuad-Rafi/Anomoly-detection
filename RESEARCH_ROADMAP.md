@@ -13,11 +13,17 @@
 | PatchCore scene-1 result | Subsampled (every 100th train frame, every 10th test frame), not comparable to published numbers |
 | Pixel AUROC 0.989 | Untrustworthy until recomputed streaming on the full test set |
 | AI-VAD people-only demo | 98/98 boxed frames on `01_0026`, but tuned on that clip; `03_0061` still fails |
-| Evaluation harness | No streaming metrics, no seeds, no multi-run variance, validation split has no anomalies |
+| Frame-rate harness | Time-based sampler, seconds-based temporal logic, 30 tests, per-pair inference cache |
+| Fixed-Δt invariance | Verified 10–30 fps: 20/30 fps match 10 fps (Spearman 0.999, alarm Jaccard 0.987–0.994, zero delay); 5 fps loses box localization |
+| Avenue 25 fps demos | Avenue-fitted model; clips 05 (precision 0.928 / recall 0.402) and 17 (0.988 / 0.868, per-clip threshold) |
+| Unseen-clip calibration | **Failure:** blind q80 on clip 01 gives box precision 0.286; tuned 2.20/1.20 gives 0.546 / 0.490 |
+| Evaluation harness | Timestamped evaluator and frame-rate metrics done; no seeds, multi-run variance, or streaming pixel AUROC yet |
 | Other models | PaDiM / FUVAS / WinCLIP not benchmarked |
 
-**Conclusion:** the *pipeline and documentation* are strong; the *results* are not yet
-science. Everything below converts "a project" into "a paper".
+**Conclusion:** the *frame-rate problem* is now engineering-solved; the *results are
+still not science*. The bottleneck has moved from temporal sampling to **cross-camera
+calibration and threshold transfer**. Everything below converts "a project" into "a
+paper".
 
 ---
 
@@ -66,10 +72,16 @@ Ranked by fit with what you already have:
   fraction of memory.
 - **Why it's last:** competitive and crowded; "efficient AD" is a busy lane.
 
+**Update 2026-11-04:** RQ-1's invariance half is complete; the frame-rate failure
+reproduces and is now parameterised. The unresolved failure is **cross-clip/camera
+threshold transfer** (C-37/C-38), which makes RQ-2 and calibration a stronger near-term
+contribution. Meta-learning is relevant for few-shot calibration, not zero-shot; zero-shot
+remains a WinCLIP/foundation-model question.
+
 **Decision gate:** run a 2-week feasibility spike on RQ-1 before committing. If the
 frame-rate failure reproduces on a second method (e.g. MNAD or ARVAD), commit to RQ-1.
 
-## 2b. Current focus — higher-frame-rate detection
+## 2b. Frame-rate robustness (Phase 1 complete)
 
 Standard CCTV runs at **25/30 fps**, high-end cameras at **50/60 fps**. The model is
 time-based (`Δt ≈ 0.2 s`), so it can run on any source *today* by choosing the gap that
@@ -98,11 +110,13 @@ Steps:
 3. Run the fixed-Δt invariance ablation (velocity distribution and AUC vs fps).
 4. Refit at smaller Δt (0.05 / 0.1 / 0.2 s) with `src/fit_aivad_gap.py` and compare.
 
-> **Status 2026-11-03:** steps 1 and 3 are done (`docs/FPS_ROBUSTNESS.md`). At
+> **Status 2026-11-04:** steps 1 and 3 are done (`docs/FPS_ROBUSTNESS.md`). At
 > fixed Δt = 0.2083 s, 20/30 fps emulations match the 10 fps run (Spearman 0.999,
 > alarm Jaccard 0.987–0.994, zero delay); 5 fps keeps score/alarm agreement but loses
-> box localization. A real 25→10 fps Avenue comparison keeps ρ = 0.987. Remaining:
-> the matched Δt sweep on Avenue and genuine high-fps data (50/60 fps out of scope).
+> box localization. A real 25→10 fps Avenue comparison keeps ρ = 0.987. An
+> Avenue-fitted 25 fps model was rendered on clips 05 and 17. Remaining: the matched
+> Δt sweep on Avenue and genuine high-fps data (50/60 fps out of scope). The new
+> bottleneck is cross-clip threshold transfer (C-37/C-38), not sampling.
 
 ---
 

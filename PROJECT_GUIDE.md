@@ -1,20 +1,23 @@
 # Video Anomaly Detection — Complete Project Guide
 
-Last updated: 2026-11-03
+Last updated: 2026-11-04
 Owner: project workspace `F:\Developer Stack\ML vision`
 Status: environment ready (GPU verified); all three datasets prepared; first real PatchCore
 result on ShanghaiTech scene 1 obtained; corrected people-only AI-VAD demo delivered
-(98/98 boxed frames on ground truth, per-person precision 0.888). Training runs continue
-from here.
+(98/98 boxed frames on ground truth, per-person precision 0.888); Phase 1 frame-rate
+invariance verified; real 25 fps Avenue demos rendered (clips 05, 17, 01). Training runs
+continue from here.
 
-**Current focus:** frame-rate-robust detection. Standard CCTV runs 25/30 fps, high-end
-50/60 fps. The model is time-based (`Δt ≈ 0.2 s`), so `gap = round(fps × Δt)` runs on any
-source today. Phase 1 (2026-11-03) verified invariance at fixed Δt across 10–30 fps:
-20/30 fps emulations match the 10 fps run (Spearman 0.999, alarm Jaccard 0.987–0.994,
-zero delay); 5 fps retains score/alarm agreement but loses box localization. 50/60 fps is
-out of scope (no genuine high-fps labelled data). The open question is whether smaller Δt
-(0.04/0.08 s) improves fast-event detection — Phase 2. See `docs/FPS_ROBUSTNESS.md` and
-`RESEARCH_ROADMAP.md` §2b.
+**Current focus:** generalisation and calibration. Phase 1 (2026-11-04) closed the
+frame-rate question at fixed Δt across 10–30 fps: 20/30 fps emulations match the 10 fps
+run (Spearman 0.999, alarm Jaccard 0.987–0.994, zero delay); 5 fps retains score/alarm
+agreement but loses box localization. A real 25 fps Avenue model was fitted and rendered
+end-to-end. The new bottleneck is **threshold transfer**: a fixed Avenue threshold gave
+box precision 0.286 on an unseen clip (blind q80), and per-clip tuning improved it only
+to 0.546 precision / 0.490 recall. 50/60 fps is out of scope (no genuine high-fps
+labelled data). The open research question is whether smaller Δt (0.04/0.08 s) improves
+fast-event detection, and how to calibrate across cameras. See `docs/FPS_ROBUSTNESS.md`,
+`RESEARCH_ROADMAP.md` §2b, and `docs/CHALLENGES.md` C-37/C-38.
 
 ---
 
@@ -252,8 +255,15 @@ The downloaded archive contained these parts; all 7 sizes were verified before j
   videos are 24 fps and test frames are 10 fps. `src/fit_aivad_gap.py` builds exact
   `(t, t + step)` pairs; `src/recalibrate_aivad_norm.py` replaces outlier-dominated
   min-max normalisation with percentiles.
+- Phase 1 made the sampler explicitly time-based (`gap = round(source_fps × Δt)`) and
+  moved smoothing/tracking/cooldown to seconds. A checkpoint is valid only at the Δt it
+  was fitted on; inference at a different Δt is a new operating point, not a free change.
 - Display selection uses an anchor + 90 px radius so both fighters are boxed, plus a
   140 px focus lock that rejects a passing person who briefly outscores the event.
+- The Avenue demos show the remaining weakness: a threshold calibrated on one clip does
+  not transfer to another. Blind q80 on `01.avi` gave box precision 0.286; per-clip
+  tuning reached 0.546 precision / 0.490 recall. Per-camera calibration or a supervised
+  verifier is required.
 - AI-VAD is the prototype baseline, not a universal fight classifier; supervised event
   verification may be added after false-positive calibration and hard-negative mining.
 
@@ -646,17 +656,18 @@ Ablate the window size and the hysteresis margins.
 | 0h | Create Python 3.10 venv + CUDA PyTorch + Anomalib | Done |
 | 0i | Verify GPU with PyTorch | Done (CUDA True, RTX 3060) |
 | 0j | Fix TorchCodec + FFmpeg shared DLLs | Done |
-| 1a | Repo scaffold and config files | Partial (dirs created; code pending) |
-| 1b | Metrics and plotting utilities | Pending |
+| 1a | Repo scaffold and config files | Done (core harness, timestamped evaluator, renderers, tests) |
+| 1b | Metrics and plotting utilities | Partial (frame-rate and per-person metrics done; plotting utilities pending) |
 | 1c | Avenue data pipeline smoke test | Done (15,328 train / 15,324 test frames) |
 | 2a | PatchCore on scene 1 (real run) | Done (image AUROC 0.785, pixel AUROC 0.989) |
 | 2b | PaDiM + PatchCore on scenes 1–3 | Pending |
 | 2c | AI-VAD on scenes 1–3 | Partial (scene 1 fitted at gap 1 and gap 5; people-only `01_0026` demo corrected and evaluated per person; scenes 2–3 pending) |
+| 2d | Frame-rate robustness Phase 1 | Done (fixed-Δt invariance 10–30 fps; 5 fps box localization degrades; Avenue 25 fps demos) |
 | 3 | All 13 ShanghaiTech scenes + Avenue | Pending |
 | 4a | FUVAS few-shot (k curve) | Pending |
 | 4b | WinCLIP zero-shot | Pending |
-| 5a | Temporal layer + event metrics | Partial (AI-VAD gap, diagnostics, IoU tracks, persistence, hysteresis, focus lock, and pixel-mask per-person evaluation implemented) |
-| 5b | Demo output | Partial (two annotated MP4s rendered; Gradio UI pending) |
+| 5a | Temporal layer + event metrics | Done for AI-VAD (gap, diagnostics, IoU tracks, persistence, hysteresis, focus lock, pixel-mask per-person evaluation); event benchmark pending |
+| 5b | Demo output | Done for local demos (ShanghaiTech fight + Avenue 25 fps clips 01/05/17); Gradio UI pending |
 | 5c | ONNX export + FPS benchmark | Pending |
 | 6 | Report, README results table, error analysis | Pending |
 
@@ -706,35 +717,40 @@ must subsample frames, reduce resolution, or stream metrics per video.
 - [ ] README results table (mean ± std).
 - [ ] Heatmap grid figure (input / ground truth / model outputs).
 - [ ] Score timeline figure with anomalies marked.
-- [ ] Annotated demo video.
+- [x] Annotated demo videos (ShanghaiTech fight + Avenue 25 fps clips 01/05/17; MP4s local, ignored by git).
+- [x] Frame-rate harness, invariance results, and 30 tests.
 - [ ] Gradio app.
 - [ ] ONNX export and CPU/GPU FPS table.
 - [ ] Report with methods, results, ablations, error analysis, limitations.
 - [ ] Reproducible environment (`requirements.txt`, pinned versions, seeds).
+- [ ] Cross-camera calibration / threshold-transfer study.
 
 ## 18. Future plan (roadmap)
 
-### Phase 0 — Foundation (current)
+### Phase 0 — Foundation (done)
 
 - Finish ShanghaiTech download.
 - Join and extract archive.
 - Install and verify GPU environment.
 - Scaffold the repository.
 
-### Phase 1 — Minimal pipeline
+### Phase 1 — Minimal pipeline (done)
 
 - Shared data loader wrappers and preprocessing.
-- Metrics module and unit tests.
+- Metrics module and unit tests (30 tests).
 - Avenue end-to-end smoke test (small, fast).
+- Time-based frame-rate sampler and timestamped evaluator.
 
-### Phase 2 — Baselines
+### Phase 2 — Baselines (in progress)
 
 - PatchCore scene 1 smoke test.
-- PaDiM and PatchCore on scenes 1–3.
-- AI-VAD on scenes 1–3.
-- AI-VAD gap experiment and held-out normal calibration.
-- Initial scene-2/3 calibration and mask-zero walking/crowd hard-negative screening;
-  final gap-matched fitting and hard-negative refit remain pending.
+- PaDiM and PatchCore on scenes 1–3 (pending).
+- AI-VAD on scenes 1–3 (scene 1 done; scenes 2–3 pending).
+- AI-VAD gap experiment and held-out normal calibration (done).
+- Frame-rate invariance Phase 1 (done; 10–30 fps at fixed Δt).
+- Avenue 25 fps fit and demos (done; clips 05, 17, 01).
+- Cross-clip threshold transfer is the open failure (C-37/C-38); per-camera calibration
+  and a supervised verifier are the next steps.
 - Second-video validation (`03_0061`) confirmed ordinary walking false positives; current
   AI-VAD should not yet be described as a reliable fight detector.
 - Track-level false-alarm and event metrics.
@@ -864,3 +880,4 @@ must subsample frames, reduce resolution, or stream metrics per video.
 | 2026-11-02 | Annotated demo video rendered: `results/videos/shanghaitech_scene01_01_0136_annotated.mp4` (529 frames, 247 ANOMALY frames, max score 82.35); renderer `src/render_video.py` |
 | 2026-11-02 | AI-VAD fitted on scene 1 (738 clips, 2,262 person detections, 5:02); corrected people-only fight video rendered with density-estimator region scores: `results/videos/shanghaitech_scene01_01_0026_people_annotated.mp4` (161 frames, 91 boxed) |
 | 2026-11-03 | Diagnosed gap/fps mismatch (24 fps training, 10 fps test); fitted gap-matched scene-1 checkpoint (2,757 clips, 8,788 detections, 34:30) and added percentile normalisation. Per-person pixel-mask evaluation and focus-lock selection. Final fight video: 138 frames, 98/98 boxed frames on GT, per-person precision 0.888 / recall 0.812. Retracted the gap-5 "clean" render (18.2% precision). |
+| 2026-11-04 | Added time-based sampler, shared AI-VAD core, timestamped evaluator with pair cache and video rendering, 30 tests, and golden regression guard. Phase 1 invariance: 20/30 fps match 10 fps at fixed Δt (Spearman 0.999, alarm Jaccard 0.987–0.994, zero delay); 5 fps loses box localization. Generalised gap fit/recalibration to Avenue; rendered real 25 fps clips 05 and 17. Blind clip 01 exposed cross-clip threshold failure (box precision 0.286); tuned rerender reached 0.546 precision / 0.490 recall. Documented C-37/C-38 and pushed to GitHub (`eb6bbc7`). |

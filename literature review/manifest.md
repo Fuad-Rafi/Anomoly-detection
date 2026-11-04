@@ -32,3 +32,15 @@
 | `liu2020_clustering_autoencoder` | ECCV 2020 | PAYWALLED | https://www.ecva.net/papers/eccv_2020/papers_ECCV/html/2931_ECCV_2020_paper.php |
 
 > Regenerate with `python download_papers.py`.
+
+## Meta-learning / few-shot references (not yet downloaded)
+
+These are summarised in `01_literature_review.md` §10; PDFs are not yet fetched.
+
+| Key | Paper | Venue | Link |
+|---|---|---|---|
+| `finn2017_maml` | Model-Agnostic Meta-Learning | ICML 2017 | https://arxiv.org/abs/1703.03400 |
+| `nichol2018_reptile` | On First-Order Meta-Learning Algorithms | arXiv 2018 | https://arxiv.org/abs/1803.02999 |
+| `snell2017_protonet` | Prototypical Networks for Few-shot Learning | NeurIPS 2017 | https://arxiv.org/abs/1703.05175 |
+| `vinyals2016_matching` | Matching Networks for One Shot Learning | NeurIPS 2016 | https://arxiv.org/abs/1606.04080 |
+| `sung2018_relation` | Learning to Compare: Relation Network | CVPR 2018 | https://arxiv.org/abs/1711.06025 |
